@@ -1,6 +1,8 @@
+import copy
 import sys
 import time
 import pymoos
+import math
 import numpy as np
 from brping import PingMessage
 from brping import PingParser
@@ -17,7 +19,7 @@ class PPlumeDetector():
     def __init__(self):
 
         # Constants
-        self.K = 2 #Threshold for each ping = mean + K*std.dev
+        self.k_const = 2 #Threshold for each ping = mean + K*std.dev
         self.GRADS_TO_RADS = np.pi/200
 
         self.comms = pymoos.comms()
@@ -28,12 +30,15 @@ class PPlumeDetector():
         self.start_angle_grads = None
         self.stop_angle_grads = None
         self.transmit_enable = None
+        self.speed_of_sound = None
         self.binary_device_data_msg = None # Encoded PING360_DEVICE_DATA message
         self.device_data_msg = None # Decoded PING360_DEVICE_DATA message
 
         # Matrix containing segmented data (i.e. result from thresholding) from the scan of the entire sonar swath.
         # Row indexes define the sample number and each column is for a different scan angle
         self.seg_scan = None
+
+        self.clustered_seg = None
 
         # Array indicating whether the data in the corresponding column of the seg_scan matrix is valid
         self.seg_scan_valid_cols = None
@@ -81,6 +86,7 @@ class PPlumeDetector():
         success = success and self.comms.register('SONAR_STOP_ANGLE_GRADS', 0)
         success = success and self.comms.register('SONAR_PING_DATA', 0)
         success = success and self.comms.register('SONAR_TRANSMIT_ENABLE', 0)
+        success = success and self.comms.register('SONAR_SPEED_OF_SOUND', 0)
 
         if success:
             self.set_state('DB_CONNECTED')
@@ -173,11 +179,13 @@ class PPlumeDetector():
                 self.stop_angle_grads = val
             elif name == 'SONAR_TRANSMIT_ENABLE':
                 self.transmit_enable = val
+            elif name == 'SONAR_SPEED_OF_SOUND':
+                self.speed_of_sound = val
 
         # Class can be configured once all the vars have been set
-        if self.num_samples and self.num_steps and self.start_angle_grads and self.stop_angle_grads:
-            print("Config vars:{0}, steps: {1}, start: {2}, stop: {3}".format(self.num_samples, self.num_steps,
-                                                                              self.start_angle_grads, self.stop_angle_grads))
+        if self.num_samples and self.num_steps and self.start_angle_grads and self.stop_angle_grads and self.speed_of_sound:
+            print("Config vars:samples: {0}, steps: {1}, start: {2}, stop: {3}, speed of sound: {4}".format(self.num_samples,
+                    self.num_steps, self.start_angle_grads, self.stop_angle_grads, self.speed_of_sound))
             self.ready_for_config = True
 
         return
@@ -197,7 +205,7 @@ class PPlumeDetector():
             scan_angles_list = [i for i in range(self.start_angle_grads, self.stop_angle_grads+1, self.num_steps)]
             self.scan_angles = np.array(scan_angles_list, dtype=np.uint)
 
-        self.seg_scan = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint)
+        self.seg_scan = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
         self.seg_scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
 
         print ("PPlumeDetector configured with {0} scanning field".format(self.seg_scan.shape))
@@ -228,7 +236,7 @@ class PPlumeDetector():
             if ping_parser.parse_byte(byte) is PingParser.NEW_MESSAGE:
                 self.device_data_msg = ping_parser.rx_msg
 
-        # Set to None as an indicator that the ata has been processed
+        # Set to None as an indicator that the data has been processed
         self.binary_device_data_msg = None
 
         if self.device_data_msg is None:
@@ -259,10 +267,13 @@ class PPlumeDetector():
             return False
 
         # Adaptively threshold the data to segment it
-        mean = np.mean(intensities)
-        std_dev = np.std(intensities)
-        threshold = mean + self.K*std_dev
-        segmented_data = (intensities > threshold).astype(int)
+        intensities_mod = copy.deepcopy(intensities)
+        intensities_mod[0:150] = np.zeros((150))
+        mean = np.mean(intensities[150:])
+        std_dev = np.std(intensities[150:])
+        #threshold = mean + std_dev*self.k_const
+        threshold = mean + 2*std_dev
+        segmented_data = (intensities_mod > threshold).astype(np.uint8)
 
         # Save segmented data and valid flag
         # First get column index for storage. The [0][0] required because np.where returns tuple containing an array
@@ -271,6 +282,49 @@ class PPlumeDetector():
         self.seg_scan_valid_cols[scanned_index] = 1
 
         return True
+
+    def cluster_seg_scan(self):
+        # TODO P1 - Clean up
+
+        # Window sizes should be odd numbers
+        window_rows = 29
+        window_cols = 7
+        area = window_rows*window_cols
+        row_padding = math.floor(window_rows / 2)
+        col_padding = math.floor(window_cols / 2)
+
+        rows = self.seg_scan.shape[0]
+        cols = self.seg_scan.shape[1]
+        self.clustered_seg = np.zeros((rows, cols), dtype=np.uint8)
+
+        # Note: output matrix is zero padded
+        for row in range(row_padding, rows-row_padding, 1):
+            for col in range(col_padding, cols-col_padding, 1):
+                if self.seg_scan[row, col]:
+                    start_row = row - row_padding
+                    end_row   = row + row_padding + 1
+                    start_col = col - col_padding
+                    end_col   = col + col_padding + 1
+                    filled = (self.seg_scan[start_row:end_row, start_col:end_col]).sum()
+                    if filled > 0.5*area:
+                        self.clustered_seg[row,col] = 1
+
+        return
+
+    def calc_range(self, sample_num):
+        '''Calculates the one-way range (meters) for the specified sample number'''
+
+        if self.device_data_msg is None:
+            return int(0)
+
+        # Sample period in device data message is measured in 25 nano-second increments
+        sample_period_sec = self.device_data_msg.sample_period * 25e-9
+
+        range = (sample_period_sec * sample_num * self.speed_of_sound) / 2
+
+        return range
+
+
 
 
 
