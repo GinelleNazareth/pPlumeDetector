@@ -5,6 +5,7 @@ from datetime import datetime
 from src.plume_detector import PPlumeDetector
 import numpy as np
 import cv2 as cv
+import time
 import math
 import copy
 import os
@@ -28,6 +29,8 @@ speed_of_sound = 1500
 def create_sonar_images(sector_intensities):
     '''Rearrages sector intensities matrix to  '''
 
+    start_time = time.time()
+    print("Warping start:", start_time)
     # Transpose sector intensities to match required orientation for warping
     sector_intensities_t = copy.deepcopy(sector_intensities)
     sector_intensities_t = sector_intensities_t.transpose()
@@ -43,12 +46,14 @@ def create_sonar_images(sector_intensities):
     warped_image = cv.warpPolar(sector_intensities_mod, center=(radius, radius), maxRadius=radius, dsize=(2 * radius, 2 * radius),
                           flags=warp_flags)
 
+    end_time = time.time()
+    print("Warping end:", end_time)
+    print("Warping time:", end_time - start_time)
     return warped_image
 
 
 def calc_scatter(plume_detector, sector_intensities):
     '''Calculate x-y co-ordinates of points for scatter plot. 'Colours' are intensity values'''
-    sector_intensities[:, angle] = ping_intensities
 
     it = np.nditer(sector_intensities, flags = ['multi_index'])
     x = np.zeros(sector_intensities.size)
@@ -59,22 +64,11 @@ def calc_scatter(plume_detector, sector_intensities):
     while not it.finished:
 
         # Get angle and range
-        sample_num, ping360_angle_grads = it.multi_index
-        range_m = plume_detector.calc_range(plume_detector, sample_num)
+        sample_num, angle = it.multi_index
 
-        # Convert angle from ping360 reference (0 towards bottom, clockwise rotation) to standard reference (0 towards
-        # right, counter-clockwise rotation)
-        angle_grads = 300 - ping360_angle_grads
-        if angle_grads < 0:
-            angle_grads = angle_grads + 400
-
-        # Convert angle in gradians to angle in radians
-        angle_rads = angle_grads * 360/400 * math.pi/180
-
-        # Convert polar to cartesian co-ordinates
-        x[i] = range_m * math.cos(angle_rads)
-        y[i] = range_m * math.sin(angle_rads)
-        colours[i] = sector_intensities[sample_num,ping360_angle_grads]
+        x[i] = plume_detector.cart_x[sample_num, angle]
+        y[i] = plume_detector.cart_y[sample_num, angle]
+        colours[i] = sector_intensities[sample_num, angle]
 
         i = i+1
         is_not_finished = it.iternext()
@@ -101,13 +95,13 @@ if __name__ == "__main__":
         print(error)
 
     # Setup Plume Detector
-    plume_detector = PPlumeDetector
+    plume_detector = PPlumeDetector()
     plume_detector.start_angle_grads = start_angle_grads
     plume_detector.stop_angle_grads = stop_angle_grads
     plume_detector.num_samples = num_samples
     plume_detector.num_steps = num_steps
     plume_detector.speed_of_sound = speed_of_sound
-    plume_detector.configure(plume_detector)
+    plume_detector.configure()
 
     # Open log and begin processing
     log = PingViewerLogReader(args.file)
@@ -135,9 +129,8 @@ if __name__ == "__main__":
         ping_intensities = np.frombuffer(decoded_message.data,
                                     dtype=np.uint8)  # Convert intensity data bytearray to numpy array
 
-        plume_detector.device_data_msg = decoded_message
-        plume_detector.update_seg_scan(plume_detector)
-
+        plume_detector.binary_device_data_msg = bytes(decoded_message.pack_msg_data())
+        plume_detector.process_ping_data()
 
         sector_intensities[:, angle] = ping_intensities
 
@@ -145,12 +138,13 @@ if __name__ == "__main__":
         if angle == 199:
             scan_num += 1
             print('Last timestamp',timestamp)
-            range_m = plume_detector.calc_range(plume_detector, num_samples)
+            range_m = plume_detector.calc_range(num_samples)
+            range_m_int = round(range_m)
             print('Range: ', range)
 
             seg_sector = 255*plume_detector.seg_scan
 
-            plume_detector.cluster_seg_scan(plume_detector)
+            plume_detector.cluster_seg_scan()
             clustered_seg = 255*plume_detector.clustered_seg
 
             warped = create_sonar_images(sector_intensities)
@@ -166,25 +160,19 @@ if __name__ == "__main__":
             plt.axis('off')
 
             ax = fig.add_subplot(2, 2, 1)
-            x, y, colours = calc_scatter(plume_detector, sector_intensities)
+            #x, y, colours = calc_scatter(plume_detector, sector_intensities)
             #plt.scatter(x,y,c=colours)
             #ax.set_aspect('equal')
 
-            #plt.imshow(sector_intensities.transpose(), interpolation='nearest', cmap='jet')
+            plt.imshow(sector_intensities.transpose(), interpolation='nearest', cmap='jet')
             #ax.set_xticks([0, 0.25*num_samples, 0.5*num_samples, 0.75*num_samples, num_samples],
-            #              labels=['0', str(0.25*range_m), str(0.5*range_m), str(0.75*range_m), str(range_m)])
-
-
-            #fig.add_subplot(2, 3, 2)
-            #plt.imshow(seg_sector.transpose(),interpolation='nearest',cmap='jet')
-
-            #fig.add_subplot(2, 3, 3)
-            #plt.imshow(clustered_seg.transpose(),interpolation='nearest',cmap='jet')
-
+            #              labels=['0', str(0.25*range_m_int), str(0.5*range_m_int), str(0.75*range_m_int), str(range_m_int)])
+            x_label_pos = [0, 0.25*num_samples, 0.5*num_samples, 0.75*num_samples, num_samples]
+            x_labels    = ['0', str(0.25*range_m_int), str(0.5*range_m_int), str(0.75*range_m_int), str(range_m_int)]
+            ax.set_xticks(x_label_pos, labels=x_labels)
 
             # Labels and label positions for warped images
             rows, cols = warped.shape[0], warped.shape[1]
-            range_m_int = round(range_m)
             x_label_pos = [0, 0.25*cols, 0.5*cols, 0.75*cols, cols]
             x_labels    = [str(range_m_int), str(0.5*range_m_int), '0', str(0.5*range_m_int), str(range_m_int)]
             y_label_pos = [0, 0.25*rows, 0.5*rows, 0.75*rows, rows]
@@ -208,8 +196,8 @@ if __name__ == "__main__":
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
-            plt.show()
-            #plt.savefig(os.path.join(img_save_path, suptitle))
+            #plt.show()
+            plt.savefig(os.path.join(img_save_path, suptitle))
 
             start_timestamp = ""
 
