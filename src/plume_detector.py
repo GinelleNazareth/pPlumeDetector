@@ -47,6 +47,10 @@ class PPlumeDetector():
         self.full_scans = 0
         self.first_scan = True
 
+        # Cartesian x-y co-ordinates of each point in the sector scan
+        self.cart_x = None
+        self.cart_y = None
+
         # Indicates whether all the config vars have been received, and the class data structures can be configured
         self.ready_for_config = False
 
@@ -191,8 +195,10 @@ class PPlumeDetector():
         return
 
     def configure(self):
-        '''Initializes the self.scan_angles and self.seg_scan vars'''
+        '''Initializes the self.scan_angles and self.seg_scan vars. The scan angles are computed base don the start/stop
+        angles and the number of steps. '''
 
+        # Calculate scan angles
         if self.start_angle_grads > self.stop_angle_grads: # Sector crosses 399->0 grads
             # Add 400 to stop angle because scan angles generation is easier when stop angle > start angle
             stop_angle_adjusted_grads = self.stop_angle_grads + 400
@@ -205,16 +211,47 @@ class PPlumeDetector():
             scan_angles_list = [i for i in range(self.start_angle_grads, self.stop_angle_grads+1, self.num_steps)]
             self.scan_angles = np.array(scan_angles_list, dtype=np.uint)
 
+        # Initialize self.seg_scan and self.seg_scan_valid_cols
         self.seg_scan = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
         self.seg_scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
 
         print ("PPlumeDetector configured with {0} scanning field".format(self.seg_scan.shape))
         return
 
+    def init_cart_xy(self):
+        '''Calculates cartesian x-y co-ordinates of each point in the sector scan, and stores them in self.cart_x, self.cart_y'''
+
+        self.cart_x = np.zeros((self.num_samples, len(self.scan_angles)))
+        self.cart_y = np.zeros((self.num_samples, len(self.scan_angles)))
+
+        for sample_num in range(self.num_samples):
+            for col, ping360_angle_grads in enumerate(self.scan_angles):
+
+                range_m = self.calc_range(sample_num)
+
+                # Convert angle from ping360 reference (0 towards bottom, clockwise rotation) to standard reference (0 towards
+                # right, counter-clockwise rotation)
+                angle_grads = 300 - ping360_angle_grads
+                if angle_grads < 0:
+                    angle_grads = angle_grads + 400
+
+                # Convert angle in gradians to angle in radians
+                angle_rads = angle_grads * 360 / 400 * math.pi / 180
+
+                # Convert polar to cartesian co-ordinates
+                self.cart_x[sample_num, col] = range_m * math.cos(angle_rads)
+                self.cart_y[sample_num, col] = range_m * math.sin(angle_rads)
+
+
     def process_ping_data(self):
 
         if not self.decode_device_data_msg():
             return False
+
+        # If not done, initialize arrays with cartesian x-y co-ordinates of each point in the sector scan
+        # Done here because the sample period from the device data message is required for calculating ranges
+        if self.cart_x is None:
+            self.init_cart_xy()
 
         if not self.update_seg_scan():
             return False
@@ -286,28 +323,132 @@ class PPlumeDetector():
     def cluster_seg_scan(self):
         # TODO P1 - Clean up
 
-        # Window sizes should be odd numbers
-        window_rows = 29
-        window_cols = 7
-        area = window_rows*window_cols
-        row_padding = math.floor(window_rows / 2)
-        col_padding = math.floor(window_cols / 2)
-
+        radius = 0.25
         rows = self.seg_scan.shape[0]
         cols = self.seg_scan.shape[1]
         self.clustered_seg = np.zeros((rows, cols), dtype=np.uint8)
 
+        start = time.time()
+        print("Start: ", start)
+
+        for row in range(rows):
+            for col in range(cols):
+
+                if self.seg_scan[row, col] == 0:
+                    continue
+
+                x = self.cart_x[row, col]
+                y = self.cart_y[row, col]
+
+                total_points = 0
+                target_points = 0
+
+                search_col = col
+                points_found = True
+
+                # Search columns to left
+                while search_col > 0 and points_found:
+                    points_found = False
+                    search_row = row
+
+                    # Search rows above in the column
+                    while search_row < self.num_samples:
+                        search_x = self.cart_x[search_row, search_col]
+                        search_y = self.cart_y[search_row, search_col]
+                        dist = math.dist([x,y],[search_x, search_y])
+                        if dist < radius:
+                            total_points = total_points + 1
+                            points_found = True
+                            if self.seg_scan[search_row, search_col] == 1:
+                                target_points = target_points + 1
+                        else:
+                            break
+                        search_row = search_row + 1
+
+                    # Search rows below in the column
+                    search_row = row - 1
+                    while search_row >= 0:
+                        search_x = self.cart_x[search_row, search_col]
+                        search_y = self.cart_y[search_row, search_col]
+                        dist = math.dist([x,y],[search_x, search_y])
+                        if dist < radius:
+                            total_points = total_points + 1
+                            points_found = True
+                            if self.seg_scan[search_row, search_col] == 1:
+                                target_points = target_points + 1
+                        else:
+                            break
+                        search_row = search_row - 1
+
+                    search_col = search_col - 1
+
+                # Search columns to the right
+                points_found = True
+                search_col = col + 1
+                while search_col < self.seg_scan.shape[1] and points_found:
+                    points_found = False
+                    search_row = row
+
+                    # Search rows above in the column
+                    while search_row < self.num_samples:
+                        search_x = self.cart_x[search_row, search_col]
+                        search_y = self.cart_y[search_row, search_col]
+                        dist = math.dist([x,y],[search_x, search_y])
+                        if dist < radius:
+                            total_points = total_points + 1
+                            points_found = True
+                            if self.seg_scan[search_row, search_col] == 1:
+                                target_points = target_points + 1
+                        else:
+                            break
+                        search_row = search_row + 1
+
+                    # Search rows below in the column
+                    search_row = row - 1
+                    while search_row >= 0:
+                        search_x = self.cart_x[search_row, search_col]
+                        search_y = self.cart_y[search_row, search_col]
+                        dist = math.dist([x,y],[search_x, search_y])
+                        if dist < radius:
+                            total_points = total_points + 1
+                            points_found = True
+                            if self.seg_scan[search_row, search_col] == 1:
+                                target_points = target_points + 1
+                        else:
+                            break
+                        search_row = search_row - 1
+
+                    search_col = search_col + 1
+
+                if target_points > 0.25 *total_points:
+                    self.clustered_seg[row, col] = 1
+
+        end = time.time()
+        print("End: ", end)
+        print("Clustering time is ", end-start)
+
+        # Window sizes should be odd numbers
+        #window_rows = 29
+        #window_cols = 7
+        #area = window_rows*window_cols
+        #row_padding = math.floor(window_rows / 2)
+        #col_padding = math.floor(window_cols / 2)
+
+        #rows = self.seg_scan.shape[0]
+        #cols = self.seg_scan.shape[1]
+        #self.clustered_seg = np.zeros((rows, cols), dtype=np.uint8)
+
         # Note: output matrix is zero padded
-        for row in range(row_padding, rows-row_padding, 1):
-            for col in range(col_padding, cols-col_padding, 1):
-                if self.seg_scan[row, col]:
-                    start_row = row - row_padding
-                    end_row   = row + row_padding + 1
-                    start_col = col - col_padding
-                    end_col   = col + col_padding + 1
-                    filled = (self.seg_scan[start_row:end_row, start_col:end_col]).sum()
-                    if filled > 0.5*area:
-                        self.clustered_seg[row,col] = 1
+        #for row in range(row_padding, rows-row_padding, 1):
+        #    for col in range(col_padding, cols-col_padding, 1):
+        #        if self.seg_scan[row, col]:
+        #            start_row = row - row_padding
+        #            end_row   = row + row_padding + 1
+        #            start_col = col - col_padding
+        #            end_col   = col + col_padding + 1
+        #            filled = (self.seg_scan[start_row:end_row, start_col:end_col]).sum()
+        #            if filled > 0.5*area:
+        #                self.clustered_seg[row,col] = 1
 
         return
 
@@ -315,7 +456,7 @@ class PPlumeDetector():
         '''Calculates the one-way range (meters) for the specified sample number'''
 
         if self.device_data_msg is None:
-            return int(0)
+            raise Exception("Cannot calculate range without sample period from device data message")
 
         # Sample period in device data message is measured in 25 nano-second increments
         sample_period_sec = self.device_data_msg.sample_period * 25e-9
