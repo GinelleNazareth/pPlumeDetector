@@ -8,6 +8,7 @@ from brping import PingMessage
 from brping import PingParser
 from brping import definitions
 from datetime import datetime
+from sklearn.cluster import DBSCAN
 
 # Limitations
 # 1) Processes data as it comes in, regardless of timeouts/power cycles, as
@@ -309,7 +310,7 @@ class PPlumeDetector():
         mean = np.mean(intensities[150:])
         std_dev = np.std(intensities[150:])
         #threshold = mean + std_dev*self.k_const
-        threshold = mean + 2*std_dev
+        threshold = mean + 2.5*std_dev
         segmented_data = (intensities_mod > threshold).astype(np.uint8)
 
         # Save segmented data and valid flag
@@ -320,137 +321,79 @@ class PPlumeDetector():
 
         return True
 
-    def cluster_seg_scan(self):
-        # TODO P1 - Clean up
+    def cluster_seg_scan_old(self, image):
 
-        radius = 0.25
-        rows = self.seg_scan.shape[0]
-        cols = self.seg_scan.shape[1]
-        self.clustered_seg = np.zeros((rows, cols), dtype=np.uint8)
+        window_width_m = 1
+        image_width_pixels = image.shape[1] # Assumes square image
+        range_m = self.calc_range(self.num_samples)
+        window_width_pixels = window_width_m * image_width_pixels / (2 * range_m)
+        print("Window width is ", window_width_pixels)
 
         start = time.time()
         print("Start: ", start)
 
-        for row in range(rows):
-            for col in range(cols):
+        # Window sizes should be odd numbers
+        window_rows = window_width_pixels
+        window_cols = window_width_pixels
+        area = window_rows*window_cols
+        row_padding = math.floor(window_rows / 2)
+        col_padding = math.floor(window_cols / 2)
 
-                if self.seg_scan[row, col] == 0:
-                    continue
+        #rows = self.seg_scan.shape[0]
+        #cols = self.seg_scan.shape[1]
+        #self.clustered_seg = np.zeros((rows, cols), dtype=np.uint8)
+        rows = image.shape[0]
+        cols = image.shape[1]
+        self.clustered_seg = np.zeros((rows, cols), dtype=np.uint8)
 
-                x = self.cart_x[row, col]
-                y = self.cart_y[row, col]
 
-                total_points = 0
-                target_points = 0
-
-                search_col = col
-                points_found = True
-
-                # Search columns to left
-                while search_col > 0 and points_found:
-                    points_found = False
-                    search_row = row
-
-                    # Search rows above in the column
-                    while search_row < self.num_samples:
-                        search_x = self.cart_x[search_row, search_col]
-                        search_y = self.cart_y[search_row, search_col]
-                        dist = math.dist([x,y],[search_x, search_y])
-                        if dist < radius:
-                            total_points = total_points + 1
-                            points_found = True
-                            if self.seg_scan[search_row, search_col] == 1:
-                                target_points = target_points + 1
-                        else:
-                            break
-                        search_row = search_row + 1
-
-                    # Search rows below in the column
-                    search_row = row - 1
-                    while search_row >= 0:
-                        search_x = self.cart_x[search_row, search_col]
-                        search_y = self.cart_y[search_row, search_col]
-                        dist = math.dist([x,y],[search_x, search_y])
-                        if dist < radius:
-                            total_points = total_points + 1
-                            points_found = True
-                            if self.seg_scan[search_row, search_col] == 1:
-                                target_points = target_points + 1
-                        else:
-                            break
-                        search_row = search_row - 1
-
-                    search_col = search_col - 1
-
-                # Search columns to the right
-                points_found = True
-                search_col = col + 1
-                while search_col < self.seg_scan.shape[1] and points_found:
-                    points_found = False
-                    search_row = row
-
-                    # Search rows above in the column
-                    while search_row < self.num_samples:
-                        search_x = self.cart_x[search_row, search_col]
-                        search_y = self.cart_y[search_row, search_col]
-                        dist = math.dist([x,y],[search_x, search_y])
-                        if dist < radius:
-                            total_points = total_points + 1
-                            points_found = True
-                            if self.seg_scan[search_row, search_col] == 1:
-                                target_points = target_points + 1
-                        else:
-                            break
-                        search_row = search_row + 1
-
-                    # Search rows below in the column
-                    search_row = row - 1
-                    while search_row >= 0:
-                        search_x = self.cart_x[search_row, search_col]
-                        search_y = self.cart_y[search_row, search_col]
-                        dist = math.dist([x,y],[search_x, search_y])
-                        if dist < radius:
-                            total_points = total_points + 1
-                            points_found = True
-                            if self.seg_scan[search_row, search_col] == 1:
-                                target_points = target_points + 1
-                        else:
-                            break
-                        search_row = search_row - 1
-
-                    search_col = search_col + 1
-
-                if target_points > 0.25 *total_points:
-                    self.clustered_seg[row, col] = 1
+        # Note: output matrix is zero padded
+        for row in range(row_padding, rows-row_padding, 1):
+            for col in range(col_padding, cols-col_padding, 1):
+                if image[row, col]:
+                    start_row = row - row_padding
+                    end_row   = row + row_padding + 1
+                    start_col = col - col_padding
+                    end_col   = col + col_padding + 1
+                    filled = (image[start_row:end_row, start_col:end_col]).sum()
+                    if filled > 0.25*area*255: #TODO : change sp 255 not needed
+                        self.clustered_seg[row,col] = 1
 
         end = time.time()
         print("End: ", end)
         print("Clustering time is ", end-start)
 
-        # Window sizes should be odd numbers
-        #window_rows = 29
-        #window_cols = 7
-        #area = window_rows*window_cols
-        #row_padding = math.floor(window_rows / 2)
-        #col_padding = math.floor(window_cols / 2)
+    def cluster_seg_scan(self, image):
+        # TODO P1 - Clean up
 
-        #rows = self.seg_scan.shape[0]
-        #cols = self.seg_scan.shape[1]
-        #self.clustered_seg = np.zeros((rows, cols), dtype=np.uint8)
+        window_width_m = 0.25
+        image_width_pixels = image.shape[1] # Assumes square image
+        range_m = self.calc_range(self.num_samples)
+        window_width_pixels = window_width_m * image_width_pixels / (2 * range_m)
+        print("Window width is ", window_width_pixels)
 
-        # Note: output matrix is zero padded
-        #for row in range(row_padding, rows-row_padding, 1):
-        #    for col in range(col_padding, cols-col_padding, 1):
-        #        if self.seg_scan[row, col]:
-        #            start_row = row - row_padding
-        #            end_row   = row + row_padding + 1
-        #            start_col = col - col_padding
-        #            end_col   = col + col_padding + 1
-        #            filled = (self.seg_scan[start_row:end_row, start_col:end_col]).sum()
-        #            if filled > 0.5*area:
-        #                self.clustered_seg[row,col] = 1
+        # From the image, extract the list of points (detections above the threshold)
+        num_points = self.seg_scan.sum()
+        points = np.zeros(shape=(num_points,2))
+        index = 0
+        for row in range(image.shape[0]):
+            for col in range(image.shape[1]):
+                if image[row,col]:
+                    #points[index] = [self.cart_x[row,col], self.cart_y[row,col]]
+                    #points[index] = [row, col]
+                    points[index] = [col, row]
+                    index = index + 1
 
-        return
+        start = time.time()
+        print("Start: ", start)
+
+        db = DBSCAN(eps=window_width_pixels, min_samples=6).fit(points)
+
+        end = time.time()
+        print("End: ", end)
+        print("DBSCAN time is ", end-start)
+
+        return points, db
 
     def calc_range(self, sample_num):
         '''Calculates the one-way range (meters) for the specified sample number'''
@@ -464,6 +407,8 @@ class PPlumeDetector():
         range = (sample_period_sec * sample_num * self.speed_of_sound) / 2
 
         return range
+
+
 
 
 
