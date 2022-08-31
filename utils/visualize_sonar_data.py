@@ -17,8 +17,8 @@ rcParams['font.family'] = 'serif'
 # ping360_20210901_123108.bin
 
 # Script settings
-#start_time = "00:00:30.000"
-start_time = "00:10:02.000"
+start_time = "00:00:30.000"
+#start_time = "00:10:00.000"
 start_angle_grads = 0
 stop_angle_grads = 399
 num_samples = 1200
@@ -29,8 +29,6 @@ speed_of_sound = 1500
 def create_sonar_images(sector_intensities):
     '''Rearrages sector intensities matrix to  '''
 
-    start_time = time.time()
-    print("Warping start:", start_time)
     # Transpose sector intensities to match required orientation for warping
     sector_intensities_t = copy.deepcopy(sector_intensities)
     sector_intensities_t = sector_intensities_t.transpose()
@@ -41,14 +39,11 @@ def create_sonar_images(sector_intensities):
     sector_intensities_mod[100:400] = sector_intensities_t[0:300]
 
     # Warp intensities matrix into circular image
-    radius = int(600 / (2 * np.pi))
+    radius = 100 # Output image will be 200x200 pixels
     warp_flags = flags = cv.WARP_INVERSE_MAP + cv.WARP_POLAR_LINEAR + cv.WARP_FILL_OUTLIERS + cv.INTER_NEAREST
     warped_image = cv.warpPolar(sector_intensities_mod, center=(radius, radius), maxRadius=radius, dsize=(2 * radius, 2 * radius),
                           flags=warp_flags)
 
-    end_time = time.time()
-    print("Warping end:", end_time)
-    print("Warping time:", end_time - start_time)
     return warped_image
 
 
@@ -144,12 +139,12 @@ if __name__ == "__main__":
 
             seg_sector = 255*plume_detector.seg_scan
 
-            plume_detector.cluster_seg_scan()
-            clustered_seg = 255*plume_detector.clustered_seg
-
             warped = create_sonar_images(sector_intensities)
             seg_warped = create_sonar_images(seg_sector)
-            clustered_seg_warped = create_sonar_images(clustered_seg)
+
+            X, db = plume_detector.cluster_seg_scan(seg_warped)
+            #plume_detector.cluster_seg_scan_old(seg_warped)
+            #clustered_seg_warped = 255*plume_detector.clustered_seg
 
 
             # Display images
@@ -192,12 +187,61 @@ if __name__ == "__main__":
 
             # Segmented & Clustered data, warped
             ax = fig.add_subplot(2, 2, 4)
-            plt.imshow(clustered_seg_warped, interpolation='nearest',cmap='jet')
-            ax.set_xticks(x_label_pos, labels = x_labels)
-            ax.set_yticks(y_label_pos, labels= y_labels)
+            #plt.imshow(clustered_seg_warped, interpolation='nearest',cmap='jet')
+            #ax.set_xticks(x_label_pos, labels = x_labels)
+            #ax.set_yticks(y_label_pos, labels= y_labels)
+            ax.set_aspect('equal')
 
-            #plt.show()
-            plt.savefig(os.path.join(img_save_path, suptitle))
+            ax.set_xlim([0, 200])
+            ax.set_xlim([0, 200])
+            ax.set_ylim([200, 0])
+
+            core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
+            core_samples_mask[db.core_sample_indices_] = True
+            labels = db.labels_
+
+            # Number of clusters in labels, ignoring noise if present.
+            n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
+            n_noise_ = list(labels).count(-1)
+
+            print("Estimated number of clusters: %d" % n_clusters_)
+            print("Estimated number of noise points: %d" % n_noise_)
+
+            # Black removed and is used for noise instead.
+            unique_labels = set(labels)
+            colors = [plt.cm.Spectral(each) for each in np.linspace(0, 1, len(unique_labels))]
+            for k, col in zip(unique_labels, colors):
+                if k == -1:
+                    # Black used for noise.
+                    col = [0, 0, 0, 1]
+
+                class_member_mask = labels == k
+
+                xy = X[class_member_mask & core_samples_mask]
+                plt.plot(
+                    xy[:, 0],
+                    xy[:, 1],
+                    "o",
+                    markerfacecolor=tuple(col),
+                    markeredgecolor="k",
+                    markersize=4,
+                )
+
+                xy = X[class_member_mask & ~core_samples_mask]
+                plt.plot(
+                    xy[:, 0],
+                    xy[:, 1],
+                    "o",
+                    markerfacecolor=tuple(col),
+                    markeredgecolor="k",
+                    markersize=2,
+                )
+
+
+
+
+            plt.show()
+            #plt.savefig(os.path.join(img_save_path, suptitle))
 
             start_timestamp = ""
 
