@@ -13,7 +13,7 @@ from sklearn.cluster import DBSCAN
 # Limitations
 # 1) Processes data as it comes in, regardless of timeouts/power cycles, as
 # data is processed when scanning reaches start/stop angle.
-# 2) Num steps, start angle, stop angle and ping data can only be set on startup
+# 2) Num steps, start angle, stop angle and num samples can only be set on startup (however, range can be changed at run time)
 # 3) Can only have one instance of the app running at any time
 
 class PPlumeDetector():
@@ -21,7 +21,10 @@ class PPlumeDetector():
 
         # Constants
         self.k_const = 2 #Threshold for each ping = mean + K*std.dev
-        self.GRADS_TO_RADS = np.pi/200
+        self.threshold_min = 0.5*255
+        self.threshold_max = 0.95 * 255
+        self.grads_to_rads = np.pi/200
+        self.threshold = 0
 
         self.comms = pymoos.comms()
 
@@ -35,14 +38,22 @@ class PPlumeDetector():
         self.binary_device_data_msg = None # Encoded PING360_DEVICE_DATA message
         self.device_data_msg = None # Decoded PING360_DEVICE_DATA message
 
+        # Angles at which to processs the sector scan data. Gets set to the start & stop angles
+        self.scan_processing_angles = None
+
+        # Matrix containing raw intensity data for a complete scan of pings between the start and stop angles
+        self.scan_intensities = None
+        self.scan_intensities_denoised = None # Scan intensities with the central noise data removed
+        self.noise_range_m = 1 # Range within which data is ignored (usually just noise)
+
         # Matrix containing segmented data (i.e. result from thresholding) from the scan of the entire sonar swath.
         # Row indexes define the sample number and each column is for a different scan angle
         self.seg_scan = None
 
         self.clustered_seg = None
 
-        # Array indicating whether the data in the corresponding column of the seg_scan matrix is valid
-        self.seg_scan_valid_cols = None
+        # Array indicating whether the data in the corresponding columns of the scan_intensities and seg_scan matrices are valid
+        self.scan_valid_cols = None
 
         self.scan_angles = None # Array containing scan angles (gradians) for each column of the seg_scan matrix
         self.full_scans = 0
@@ -212,9 +223,13 @@ class PPlumeDetector():
             scan_angles_list = [i for i in range(self.start_angle_grads, self.stop_angle_grads+1, self.num_steps)]
             self.scan_angles = np.array(scan_angles_list, dtype=np.uint)
 
-        # Initialize self.seg_scan and self.seg_scan_valid_cols
+        # Initialize self.seg_scan and self.scan_valid_cols
+        self.scan_intensities = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
+        self.scan_intensities_denoised = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
         self.seg_scan = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
-        self.seg_scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
+        self.scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
+
+        self.scan_processing_angles = [self.start_angle_grads, self.stop_angle_grads]
 
         print ("PPlumeDetector configured with {0} scanning field".format(self.seg_scan.shape))
         return
@@ -254,10 +269,18 @@ class PPlumeDetector():
         if self.cart_x is None:
             self.init_cart_xy()
 
-        if not self.update_seg_scan():
+        if not self.update_scan_intensities():
             return False
 
-        # TODO P1 - Cluster Data
+        if self.device_data_msg.angle in self.scan_processing_angles:
+            self.segment_scan()
+
+            # TODO P1 - Cluster Data
+
+            # Reset valid flags for new data
+            self.scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
+
+            # TODO P1 - Also reset sector_intensities, but leave beginning/end (also reset valid flag to match)
 
         return False
 
@@ -289,9 +312,9 @@ class PPlumeDetector():
         #print(self.device_data_msg)
         return True
 
-    def update_seg_scan(self):
-        '''Extracts the intensities from the Ping360 device data message stored in self.binary_device_data_msg, thresholds
-        the values to create a segmented (boolean) dataset, and stores the segmented data into self.seg_scan'''
+    def update_scan_intensities(self):
+        '''Extracts the intensities from the Ping360 device data message stored in self.device_data_msg, and stores the
+        segmented data into self.seg_scan'''
 
         scanned_angle = self.device_data_msg.angle
         if scanned_angle not in self.scan_angles:
@@ -304,26 +327,42 @@ class PPlumeDetector():
             print("Intensities array length ({0}) does not match number of samples ({1})".format(intensities.size))
             return False
 
-        # Adaptively threshold the data to segment it
-        intensities_mod = copy.deepcopy(intensities)
-        intensities_mod[0:150] = np.zeros((150))
-        mean = np.mean(intensities[150:])
-        std_dev = np.std(intensities[150:])
-        #threshold = mean + std_dev*self.k_const
-        threshold = mean + 2.5*std_dev
-        segmented_data = (intensities_mod > threshold).astype(np.uint8)
-
         # Save segmented data and valid flag
         # First get column index for storage. The [0][0] required because np.where returns tuple containing an array
         scanned_index = np.where(self.scan_angles==scanned_angle)[0][0]
-        self.seg_scan[:,scanned_index] = segmented_data
-        self.seg_scan_valid_cols[scanned_index] = 1
+        self.scan_intensities[:,scanned_index] = intensities
+        self.scan_valid_cols[scanned_index] = 1
 
         return True
 
+    def segment_scan(self):
+        ''' First cuts out the data close to the sonar head. Then adaptively thresholds the scan intensities to segment
+        the data.'''
+
+        # Remove noise data close to the head
+        noise_range_samples = int((self.noise_range_m / self.calc_range(self.num_samples)) * self.num_samples)
+        self.scan_intensities_denoised = copy.deepcopy(self.scan_intensities)
+        self.scan_intensities_denoised[0:noise_range_samples, ] = np.zeros((noise_range_samples, len(self.scan_angles)),
+                                                                           dtype=np.uint8)
+
+        # Calculate mean an standard deviation of denoised data
+        data = self.scan_intensities_denoised[noise_range_samples:,]
+        mean = np.mean(self.scan_intensities_denoised[noise_range_samples:,])
+        std_dev = np.std(self.scan_intensities_denoised[noise_range_samples:,])
+
+        # Calculate threshold and clip if required
+        self.threshold = mean + self.k_const * std_dev
+        self.threshold = max(self.threshold, self.threshold_min)  # Clip threshold to the maximum
+        self.threshold = min(self.threshold, self.threshold_max)  # Clip threshold to the minimum
+
+        # Segment data
+        self.seg_scan = (self.scan_intensities_denoised > self.threshold).astype(np.uint8)
+
+        return
+
     def cluster_seg_scan_old(self, image):
 
-        window_width_m = 1
+        window_width_m = 0.5
         image_width_pixels = image.shape[1] # Assumes square image
         range_m = self.calc_range(self.num_samples)
         window_width_pixels = window_width_m * image_width_pixels / (2 * range_m)
@@ -346,7 +385,6 @@ class PPlumeDetector():
         cols = image.shape[1]
         self.clustered_seg = np.zeros((rows, cols), dtype=np.uint8)
 
-
         # Note: output matrix is zero padded
         for row in range(row_padding, rows-row_padding, 1):
             for col in range(col_padding, cols-col_padding, 1):
@@ -356,12 +394,14 @@ class PPlumeDetector():
                     start_col = col - col_padding
                     end_col   = col + col_padding + 1
                     filled = (image[start_row:end_row, start_col:end_col]).sum()
-                    if filled > 0.25*area*255: #TODO : change sp 255 not needed
+                    if filled > 0.50*area:
                         self.clustered_seg[row,col] = 1
 
         end = time.time()
         print("End: ", end)
         print("Clustering time is ", end-start)
+
+        return
 
     def cluster_seg_scan(self, image):
         # TODO P1 - Clean up
@@ -369,7 +409,7 @@ class PPlumeDetector():
         window_width_m = 0.25
         image_width_pixels = image.shape[1] # Assumes square image
         range_m = self.calc_range(self.num_samples)
-        window_width_pixels = window_width_m * image_width_pixels / (2 * range_m)
+        window_width_pixels = window_width_m * image_width_pixels / (2 * range_m) # Image width is 2* range
         print("Window width is ", window_width_pixels)
 
         # From the image, extract the list of points (detections above the threshold)
