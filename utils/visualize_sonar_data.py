@@ -39,36 +39,13 @@ def create_sonar_images(sector_intensities):
     sector_intensities_mod[100:400] = sector_intensities_t[0:300]
 
     # Warp intensities matrix into circular image
-    radius = 100 # Output image will be 200x200 pixels
+    radius = 200 # Output image will be 200x200 pixels
     warp_flags = flags = cv.WARP_INVERSE_MAP + cv.WARP_POLAR_LINEAR + cv.WARP_FILL_OUTLIERS + cv.INTER_NEAREST
     warped_image = cv.warpPolar(sector_intensities_mod, center=(radius, radius), maxRadius=radius, dsize=(2 * radius, 2 * radius),
                           flags=warp_flags)
 
     return warped_image
 
-
-def calc_scatter(plume_detector, sector_intensities):
-    '''Calculate x-y co-ordinates of points for scatter plot. 'Colours' are intensity values'''
-
-    it = np.nditer(sector_intensities, flags = ['multi_index'])
-    x = np.zeros(sector_intensities.size)
-    y = np.zeros(sector_intensities.size)
-    colours = np.zeros(sector_intensities.size)
-
-    i = 0
-    while not it.finished:
-
-        # Get angle and range
-        sample_num, angle = it.multi_index
-
-        x[i] = plume_detector.cart_x[sample_num, angle]
-        y[i] = plume_detector.cart_y[sample_num, angle]
-        colours[i] = sector_intensities[sample_num, angle]
-
-        i = i+1
-        is_not_finished = it.iternext()
-
-    return x, y, colours
 
 if __name__ == "__main__":
 
@@ -97,6 +74,7 @@ if __name__ == "__main__":
     plume_detector.num_steps = num_steps
     plume_detector.speed_of_sound = speed_of_sound
     plume_detector.configure()
+    plume_detector.scan_processing_angles = [199] # Over-write default, which is the start and stop angles
 
     # Open log and begin processing
     log = PingViewerLogReader(args.file)
@@ -119,52 +97,38 @@ if __name__ == "__main__":
         if start_timestamp == "":
             start_timestamp = timestamp
 
-        # Extract ping data from message
+        # Extract ping data from message & feed in to plume detector
         angle = decoded_message.angle
         ping_intensities = np.frombuffer(decoded_message.data,
                                     dtype=np.uint8)  # Convert intensity data bytearray to numpy array
-
         plume_detector.binary_device_data_msg = bytes(decoded_message.pack_msg_data())
         plume_detector.process_ping_data()
 
-        sector_intensities[:, angle] = ping_intensities
-
         # Display data at the end of each sector scan
         if angle == 199:
+
             scan_num += 1
             print('Last timestamp',timestamp)
             range_m = plume_detector.calc_range(num_samples)
             range_m_int = round(range_m)
             print('Range: ', range)
 
-            seg_sector = 255*plume_detector.seg_scan
+            # Create warped (polar) images
+            warped = create_sonar_images(plume_detector.scan_intensities)
+            denoised_warped = create_sonar_images(plume_detector.scan_intensities_denoised)
+            seg_warped = create_sonar_images(plume_detector.seg_scan)
 
-            warped = create_sonar_images(sector_intensities)
-            seg_warped = create_sonar_images(seg_sector)
+            # Clustering
+            #X, db = plume_detector.cluster_seg_scan(seg_warped)
+            plume_detector.cluster_seg_scan_old(seg_warped)
+            clustered_seg_warped = 255*plume_detector.clustered_seg
 
-            X, db = plume_detector.cluster_seg_scan(seg_warped)
-            #plume_detector.cluster_seg_scan_old(seg_warped)
-            #clustered_seg_warped = 255*plume_detector.clustered_seg
-
-
-            # Display images
+            # Setup plot
             fig = plt.figure()
             suptitle = 'Scan ' + str(scan_num)
             plt.suptitle(suptitle)
-            plt.title('Start time: ' + start_timestamp + ', End time: ' + timestamp)
+            plt.title('Start time: ' + start_timestamp + ', End time: ' + timestamp + '. Threshold: ' + str(plume_detector.threshold))
             plt.axis('off')
-
-            ax = fig.add_subplot(2, 2, 1)
-            #x, y, colours = calc_scatter(plume_detector, sector_intensities)
-            #plt.scatter(x,y,c=colours)
-            #ax.set_aspect('equal')
-
-            plt.imshow(sector_intensities.transpose(), interpolation='nearest', cmap='jet')
-            #ax.set_xticks([0, 0.25*num_samples, 0.5*num_samples, 0.75*num_samples, num_samples],
-            #              labels=['0', str(0.25*range_m_int), str(0.5*range_m_int), str(0.75*range_m_int), str(range_m_int)])
-            x_label_pos = [0, 0.25*num_samples, 0.5*num_samples, 0.75*num_samples, num_samples]
-            x_labels    = ['0', str(0.25*range_m_int), str(0.5*range_m_int), str(0.75*range_m_int), str(range_m_int)]
-            ax.set_xticks(x_label_pos, labels=x_labels)
 
             # Labels and label positions for warped images
             rows, cols = warped.shape[0], warped.shape[1]
@@ -174,69 +138,30 @@ if __name__ == "__main__":
             y_labels    = [str(range_m_int), str(0.5*range_m_int), '0', str(0.5*range_m_int), str(range_m_int)]
 
             # Original data, warped
-            ax = fig.add_subplot(2, 2, 3)
+            ax = fig.add_subplot(2, 2, 1)
             plt.imshow(warped, interpolation='bilinear',cmap='jet')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
-            # Segmented data, warped
+            # Denoised and Segmented data, warped
             ax = fig.add_subplot(2, 2, 2)
             plt.imshow(seg_warped, interpolation='nearest',cmap='jet')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
+            # Denoised data, warped
+            ax = fig.add_subplot(2, 2, 3)
+            plt.imshow(denoised_warped, interpolation='nearest',cmap='jet')
+            ax.set_xticks(x_label_pos, labels = x_labels)
+            ax.set_yticks(y_label_pos, labels= y_labels)
+
             # Segmented & Clustered data, warped
             ax = fig.add_subplot(2, 2, 4)
+            plt.imshow(plume_detector.clustered_seg, interpolation='nearest', cmap='jet')
             #plt.imshow(clustered_seg_warped, interpolation='nearest',cmap='jet')
-            #ax.set_xticks(x_label_pos, labels = x_labels)
-            #ax.set_yticks(y_label_pos, labels= y_labels)
+            ax.set_xticks(x_label_pos, labels = x_labels)
+            ax.set_yticks(y_label_pos, labels= y_labels)
             ax.set_aspect('equal')
-
-            ax.set_xlim([0, 200])
-            ax.set_xlim([0, 200])
-            ax.set_ylim([200, 0])
-
-            core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
-            core_samples_mask[db.core_sample_indices_] = True
-            labels = db.labels_
-
-            # Number of clusters in labels, ignoring noise if present.
-            n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
-            n_noise_ = list(labels).count(-1)
-
-            print("Estimated number of clusters: %d" % n_clusters_)
-            print("Estimated number of noise points: %d" % n_noise_)
-
-            # Black removed and is used for noise instead.
-            unique_labels = set(labels)
-            colors = [plt.cm.Spectral(each) for each in np.linspace(0, 1, len(unique_labels))]
-            for k, col in zip(unique_labels, colors):
-                if k == -1:
-                    # Black used for noise.
-                    col = [0, 0, 0, 1]
-
-                class_member_mask = labels == k
-
-                xy = X[class_member_mask & core_samples_mask]
-                plt.plot(
-                    xy[:, 0],
-                    xy[:, 1],
-                    "o",
-                    markerfacecolor=tuple(col),
-                    markeredgecolor="k",
-                    markersize=4,
-                )
-
-                xy = X[class_member_mask & ~core_samples_mask]
-                plt.plot(
-                    xy[:, 0],
-                    xy[:, 1],
-                    "o",
-                    markerfacecolor=tuple(col),
-                    markeredgecolor="k",
-                    markersize=2,
-                )
-
 
 
 
