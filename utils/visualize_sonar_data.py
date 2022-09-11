@@ -40,7 +40,8 @@ def create_sonar_images(sector_intensities):
 
     # Warp intensities matrix into circular image
     radius = 200 # Output image will be 200x200 pixels
-    warp_flags = flags = cv.WARP_INVERSE_MAP + cv.WARP_POLAR_LINEAR + cv.WARP_FILL_OUTLIERS + cv.INTER_NEAREST
+    warp_flags = flags = cv.WARP_INVERSE_MAP + cv.WARP_POLAR_LINEAR + cv.WARP_FILL_OUTLIERS + cv.INTER_LINEAR
+    #warp_flags = flags = cv.WARP_INVERSE_MAP + cv.WARP_POLAR_LINEAR + cv.WARP_FILL_OUTLIERS + cv.INTER_NEAREST
     warped_image = cv.warpPolar(sector_intensities_mod, center=(radius, radius), maxRadius=radius, dsize=(2 * radius, 2 * radius),
                           flags=warp_flags)
 
@@ -108,6 +109,7 @@ if __name__ == "__main__":
         if angle == 199:
 
             scan_num += 1
+            print('Scan:', scan_num)
             print('Last timestamp',timestamp)
             range_m = plume_detector.calc_range(num_samples)
             range_m_int = round(range_m)
@@ -116,18 +118,24 @@ if __name__ == "__main__":
             # Create warped (polar) images
             warped = create_sonar_images(plume_detector.scan_intensities)
             denoised_warped = create_sonar_images(plume_detector.scan_intensities_denoised)
+
+            start = time.time()
+            print("Start: ", start)
             seg_warped = create_sonar_images(plume_detector.seg_scan)
+            end = time.time()
+            print("End: ", end)
+            print("Warping time is ", end - start)
 
             # Clustering
             #X, db = plume_detector.cluster_seg_scan(seg_warped)
-            plume_detector.cluster_seg_scan_old(seg_warped)
+            plume_detector.cluster_seg_scan_square_window(seg_warped)
             clustered_seg_warped = 255*plume_detector.clustered_seg
 
             # Setup plot
             fig = plt.figure()
             suptitle = 'Scan ' + str(scan_num)
             plt.suptitle(suptitle)
-            plt.title('Start time: ' + start_timestamp + ', End time: ' + timestamp + '. Threshold: ' + str(plume_detector.threshold))
+            plt.title('Start time: ' + start_timestamp + ', End time: ' + timestamp)
             plt.axis('off')
 
             # Labels and label positions for warped images
@@ -139,26 +147,26 @@ if __name__ == "__main__":
 
             # Original data, warped
             ax = fig.add_subplot(2, 2, 1)
-            plt.imshow(warped, interpolation='bilinear',cmap='jet')
+            #plt.imshow(warped, interpolation='bilinear',cmap='jet')
+            plt.imshow(warped, interpolation='none', cmap='jet')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
             # Denoised and Segmented data, warped
             ax = fig.add_subplot(2, 2, 2)
-            plt.imshow(seg_warped, interpolation='nearest',cmap='jet')
+            plt.imshow(seg_warped, interpolation='none',cmap='jet')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
             # Denoised data, warped
             ax = fig.add_subplot(2, 2, 3)
-            plt.imshow(denoised_warped, interpolation='nearest',cmap='jet')
+            plt.imshow(denoised_warped, interpolation='none',cmap='jet')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
             # Segmented & Clustered data, warped
             ax = fig.add_subplot(2, 2, 4)
-            plt.imshow(plume_detector.clustered_seg, interpolation='nearest', cmap='jet')
-            #plt.imshow(clustered_seg_warped, interpolation='nearest',cmap='jet')
+            plt.imshow(plume_detector.clustered_seg, interpolation='none', cmap='jet')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
             ax.set_aspect('equal')
