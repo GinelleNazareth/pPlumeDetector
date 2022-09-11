@@ -24,7 +24,7 @@ class PPlumeDetector():
         self.threshold_min = 0.5*255
         self.threshold_max = 0.95 * 255
         self.grads_to_rads = np.pi/200
-        self.threshold = 0
+        self.threshold = 0.5*255
 
         self.comms = pymoos.comms()
 
@@ -273,7 +273,6 @@ class PPlumeDetector():
             return False
 
         if self.device_data_msg.angle in self.scan_processing_angles:
-            self.segment_scan()
 
             # TODO P1 - Cluster Data
 
@@ -315,6 +314,8 @@ class PPlumeDetector():
     def update_scan_intensities(self):
         '''Extracts the intensities from the Ping360 device data message stored in self.device_data_msg, and stores the
         segmented data into self.seg_scan'''
+        ''' First cuts out the data close to the sonar head. Then adaptively thresholds the scan intensities to segment
+                the data.'''
 
         scanned_angle = self.device_data_msg.angle
         if scanned_angle not in self.scan_angles:
@@ -333,34 +334,27 @@ class PPlumeDetector():
         self.scan_intensities[:,scanned_index] = intensities
         self.scan_valid_cols[scanned_index] = 1
 
-        return True
-
-    def segment_scan(self):
-        ''' First cuts out the data close to the sonar head. Then adaptively thresholds the scan intensities to segment
-        the data.'''
-
         # Remove noise data close to the head
         noise_range_samples = int((self.noise_range_m / self.calc_range(self.num_samples)) * self.num_samples)
-        self.scan_intensities_denoised = copy.deepcopy(self.scan_intensities)
-        self.scan_intensities_denoised[0:noise_range_samples, ] = np.zeros((noise_range_samples, len(self.scan_angles)),
-                                                                           dtype=np.uint8)
+        #self.scan_intensities_denoised = copy.deepcopy(self.scan_intensities)
+        self.scan_intensities_denoised[:,scanned_index] = intensities
+        self.scan_intensities_denoised[0:noise_range_samples, scanned_index] = np.zeros((noise_range_samples), dtype=np.uint8)
 
         # Calculate mean an standard deviation of denoised data
-        data = self.scan_intensities_denoised[noise_range_samples:,]
-        mean = np.mean(self.scan_intensities_denoised[noise_range_samples:,])
-        std_dev = np.std(self.scan_intensities_denoised[noise_range_samples:,])
+        #mean = np.mean(self.scan_intensities_denoised[noise_range_samples:,scanned_index])
+        #std_dev = np.std(self.scan_intensities_denoised[noise_range_samples:,scanned_index])
 
         # Calculate threshold and clip if required
-        self.threshold = mean + self.k_const * std_dev
-        self.threshold = max(self.threshold, self.threshold_min)  # Clip threshold to the maximum
-        self.threshold = min(self.threshold, self.threshold_max)  # Clip threshold to the minimum
+        #self.threshold = mean + self.k_const * std_dev
+        #self.threshold = max(self.threshold, self.threshold_min)  # Clip threshold to the maximum
+        #self.threshold = min(self.threshold, self.threshold_max)  # Clip threshold to the minimum
 
         # Segment data
-        self.seg_scan = (self.scan_intensities_denoised > self.threshold).astype(np.uint8)
+        self.seg_scan[:,scanned_index] = (self.scan_intensities_denoised[:,scanned_index]  > self.threshold).astype(np.uint8)
 
-        return
+        return True
 
-    def cluster_seg_scan_old(self, image):
+    def cluster_seg_scan_square_window(self, image):
 
         window_width_m = 0.5
         image_width_pixels = image.shape[1] # Assumes square image
