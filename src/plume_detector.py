@@ -9,6 +9,9 @@ from brping import PingParser
 from brping import definitions
 from datetime import datetime
 from sklearn.cluster import DBSCAN
+from skimage import measure
+import numpy.ma as ma
+import cv2 as cv
 
 # Limitations
 # 1) Processes data as it comes in, regardless of timeouts/power cycles, as
@@ -51,6 +54,9 @@ class PPlumeDetector():
         self.seg_scan = None
 
         self.clustered_seg = None
+        self.clustered_seg_regions = None
+        self.labelled_seg_regions = None
+        self.labelled_clustered_seg = None
 
         # Array indicating whether the data in the corresponding columns of the scan_intensities and seg_scan matrices are valid
         self.scan_valid_cols = None
@@ -340,15 +346,6 @@ class PPlumeDetector():
         self.scan_intensities_denoised[:,scanned_index] = intensities
         self.scan_intensities_denoised[0:noise_range_samples, scanned_index] = np.zeros((noise_range_samples), dtype=np.uint8)
 
-        # Calculate mean an standard deviation of denoised data
-        #mean = np.mean(self.scan_intensities_denoised[noise_range_samples:,scanned_index])
-        #std_dev = np.std(self.scan_intensities_denoised[noise_range_samples:,scanned_index])
-
-        # Calculate threshold and clip if required
-        #self.threshold = mean + self.k_const * std_dev
-        #self.threshold = max(self.threshold, self.threshold_min)  # Clip threshold to the maximum
-        #self.threshold = min(self.threshold, self.threshold_max)  # Clip threshold to the minimum
-
         # Segment data
         self.seg_scan[:,scanned_index] = (self.scan_intensities_denoised[:,scanned_index]  > self.threshold).astype(np.uint8)
 
@@ -360,24 +357,28 @@ class PPlumeDetector():
         image_width_pixels = image.shape[1] # Assumes square image
         range_m = self.calc_range(self.num_samples)
         window_width_pixels = window_width_m * image_width_pixels / (2 * range_m)
+        window_width_pixels = 2*math.floor(window_width_pixels/2) + 1 # Window size should be an odd number
         print("Window width is ", window_width_pixels)
+
+        if window_width_pixels < 3:
+            print('Clipping clustering window with to 3 pixels (minimum)')
+            window_width_pixels = 3
 
         start = time.time()
         print("Start: ", start)
 
-        # Window sizes should be odd numbers
         window_rows = window_width_pixels
         window_cols = window_width_pixels
         area = window_rows*window_cols
         row_padding = math.floor(window_rows / 2)
         col_padding = math.floor(window_cols / 2)
 
-        #rows = self.seg_scan.shape[0]
-        #cols = self.seg_scan.shape[1]
-        #self.clustered_seg = np.zeros((rows, cols), dtype=np.uint8)
         rows = image.shape[0]
         cols = image.shape[1]
         self.clustered_seg = np.zeros((rows, cols), dtype=np.uint8)
+        self.clustered_seg_regions = np.zeros((rows, cols), dtype=np.uint8)
+        self.labelled_clustered_seg = np.zeros((rows, cols), dtype=np.uint8)
+        window_ones = np.ones((int(window_rows), int(window_cols)), dtype=np.uint8)
 
         # Note: output matrix is zero padded
         for row in range(row_padding, rows-row_padding, 1):
@@ -390,6 +391,10 @@ class PPlumeDetector():
                     filled = (image[start_row:end_row, start_col:end_col]).sum()
                     if filled > 0.50*area:
                         self.clustered_seg[row,col] = 1
+                        self.clustered_seg_regions[start_row:end_row, start_col:end_col] = window_ones
+
+        self.labelled_seg_regions, num_regions = measure.label(self.clustered_seg_regions, return_num=True, connectivity=2)
+        self.labelled_clustered_seg = self.labelled_seg_regions * image
 
         end = time.time()
         print("End: ", end)
