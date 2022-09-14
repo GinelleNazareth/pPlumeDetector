@@ -11,6 +11,8 @@ import copy
 import os
 import re
 from matplotlib import rcParams
+
+
 rcParams['font.family'] = 'serif'
 
 # 20210305-031345328.bin
@@ -133,9 +135,8 @@ if __name__ == "__main__":
 
             # Setup plot
             fig = plt.figure()
-            suptitle = 'Scan ' + str(scan_num)
+            suptitle = 'Scan ' + str(scan_num) + ' (Start time: ' + start_timestamp + ', End time: ' + timestamp + ')'
             plt.suptitle(suptitle)
-            plt.title('Start time: ' + start_timestamp + ', End time: ' + timestamp)
             plt.axis('off')
 
             # Labels and label positions for warped images
@@ -145,32 +146,59 @@ if __name__ == "__main__":
             y_label_pos = [0, 0.25*rows, 0.5*rows, 0.75*rows, rows]
             y_labels    = [str(range_m_int), str(0.5*range_m_int), '0', str(0.5*range_m_int), str(range_m_int)]
 
-            # Original data, warped
-            ax = fig.add_subplot(2, 2, 1)
+            # 1: Original data, warped
+            ax = fig.add_subplot(2, 3, 1)
             #plt.imshow(warped, interpolation='bilinear',cmap='jet')
             plt.imshow(warped, interpolation='none', cmap='jet')
+            ax.title.set_text('1: Original')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
-            # Denoised and Segmented data, warped
-            ax = fig.add_subplot(2, 2, 2)
-            plt.imshow(seg_warped, interpolation='none',cmap='jet')
-            ax.set_xticks(x_label_pos, labels = x_labels)
-            ax.set_yticks(y_label_pos, labels= y_labels)
-
-            # Denoised data, warped
-            ax = fig.add_subplot(2, 2, 3)
+            # 2: Denoised data
+            ax = fig.add_subplot(2, 3, 2)
             plt.imshow(denoised_warped, interpolation='none',cmap='jet')
+            ax.title.set_text('2: Denoised')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
-            # Segmented & Clustered data, warped
-            ax = fig.add_subplot(2, 2, 4)
-            plt.imshow(plume_detector.clustered_seg, interpolation='none', cmap='jet')
+            # 3: Segmented data
+            ax = fig.add_subplot(2, 3, 3)
+            image = seg_warped.astype(float)
+            image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
+            plt.imshow(image, interpolation='none',cmap='RdYlBu')
+            ax.title.set_text('3: Segmented')
+            ax.set_xticks(x_label_pos, labels = x_labels)
+            ax.set_yticks(y_label_pos, labels= y_labels)
+
+            # 4: Clustered Cores
+            ax = fig.add_subplot(2, 3, 4)
+            image = plume_detector.clustered_seg.astype(float)
+            image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
+            plt.imshow(image, interpolation='none',cmap='RdYlBu')
+            ax.title.set_text('4: Clustered Cores')
+            ax.set_xticks(x_label_pos, labels = x_labels)
+            ax.set_yticks(y_label_pos, labels= y_labels)
+
+
+            # 5: Labelled Regions
+            ax = fig.add_subplot(2, 3, 5)
+            image = plume_detector.labelled_seg_regions.astype(float)
+            image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
+            plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
+            ax.title.set_text('5: Labelled Regions')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
             ax.set_aspect('equal')
 
+            # 6: Final Output
+            ax = fig.add_subplot(2, 3, 6)
+            image = plume_detector.labelled_clustered_seg.astype(float)
+            image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
+            plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
+            ax.title.set_text('6: Labelled Clusters')
+            ax.set_xticks(x_label_pos, labels = x_labels)
+            ax.set_yticks(y_label_pos, labels= y_labels)
+            ax.set_aspect('equal')
 
 
             plt.show()
