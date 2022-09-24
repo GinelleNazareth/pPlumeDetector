@@ -53,10 +53,11 @@ class PPlumeDetector():
         # Row indexes define the sample number and each column is for a different scan angle
         self.seg_scan = None
 
-        self.clustered_seg = None
-        self.clustered_seg_regions = None
-        self.labelled_seg_regions = None
-        self.labelled_clustered_seg = None
+        self.seg_img = None           # self.seg_scan warped into an image (re-gridded to cartesian grid)
+        self.clustered_cores_img = None # Image with core cluster pixels (percentage of pixels in surrounding > threshold)
+        self.cluster_regions_img = None # Image wth all pixels in clustering windows set to 1  (used for labelling)
+        self.labelled_regions_img = None # Cluster regions image, with unique label (pixel value) applied to each region
+        self.labelled_clustered_img = None # seg_image * labelled_regions_img
 
         # Array indicating whether the data in the corresponding columns of the scan_intensities and seg_scan matrices are valid
         self.scan_valid_cols = None
@@ -278,9 +279,13 @@ class PPlumeDetector():
         if not self.update_scan_intensities():
             return False
 
+        # Process the data when at the start/stop angles
         if self.device_data_msg.angle in self.scan_processing_angles:
 
-            # TODO P1 - Cluster Data
+            # Warp data into image with cartesian co-ordinates
+            self.seg_img = self.create_sonar_image(self.seg_scan)
+
+            self.cluster_seg_scan_square_window()
 
             # Reset valid flags for new data
             self.scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
@@ -342,7 +347,6 @@ class PPlumeDetector():
 
         # Remove noise data close to the head
         noise_range_samples = int((self.noise_range_m / self.calc_range(self.num_samples)) * self.num_samples)
-        #self.scan_intensities_denoised = copy.deepcopy(self.scan_intensities)
         self.scan_intensities_denoised[:,scanned_index] = intensities
         self.scan_intensities_denoised[0:noise_range_samples, scanned_index] = np.zeros((noise_range_samples), dtype=np.uint8)
 
@@ -351,10 +355,35 @@ class PPlumeDetector():
 
         return True
 
-    def cluster_seg_scan_square_window(self, image):
+    def create_sonar_image(self, sector_intensities):
+        '''First rearrages sector intensities matrix to match OpenCV reference - includes reference frame conversion as
+        Ping 360 reference uses 0 towards aft while OpenCV uses 0 towards right. Then re-grids to cartesian co-ordinates
+        using the OpenCV warpPolar function'''
+
+        # Transpose sector intensities to match matrix format required for warping
+        sector_intensities_t = copy.deepcopy(sector_intensities)
+        sector_intensities_t = sector_intensities_t.transpose()
+
+        # Rearrange sector_intensities matrix to match warp co-ordinates (0 is towards right)
+        sector_intensities_mod = copy.deepcopy(sector_intensities_t)
+        sector_intensities_mod[0:100] = sector_intensities_t[300:400]
+        sector_intensities_mod[100:400] = sector_intensities_t[0:300]
+
+        # Warp intensities matrix into circular image
+        radius = 200  # Output image will be 200x200 pixels
+        warp_flags = cv.WARP_INVERSE_MAP + cv.WARP_POLAR_LINEAR + cv.WARP_FILL_OUTLIERS + cv.INTER_LINEAR
+        warped_image = cv.warpPolar(sector_intensities_mod, center=(radius, radius), maxRadius=radius,
+                                    dsize=(2 * radius, 2 * radius),
+                                    flags=warp_flags)
+
+        return warped_image
+
+    def cluster_seg_scan_square_window(self):
+        '''Applies a square window clustering method to self.seg_img, and stores the image with the labelled clustered
+        pixels as labelled_clustered_img'''
 
         window_width_m = 0.5
-        image_width_pixels = image.shape[1] # Assumes square image
+        image_width_pixels = self.seg_img.shape[1] # Assumes square image
         range_m = self.calc_range(self.num_samples)
         window_width_pixels = window_width_m * image_width_pixels / (2 * range_m)
         window_width_pixels = 2*math.floor(window_width_pixels/2) + 1 # Window size should be an odd number
@@ -373,28 +402,28 @@ class PPlumeDetector():
         row_padding = math.floor(window_rows / 2)
         col_padding = math.floor(window_cols / 2)
 
-        rows = image.shape[0]
-        cols = image.shape[1]
-        self.clustered_seg = np.zeros((rows, cols), dtype=np.uint8)
-        self.clustered_seg_regions = np.zeros((rows, cols), dtype=np.uint8)
-        self.labelled_clustered_seg = np.zeros((rows, cols), dtype=np.uint8)
+        rows = self.seg_img.shape[0]
+        cols = self.seg_img.shape[1]
+        self.clustered_cores_img = np.zeros((rows, cols), dtype=np.uint8)
+        self.cluster_regions_img = np.zeros((rows, cols), dtype=np.uint8)
+        self.labelled_clustered_img = np.zeros((rows, cols), dtype=np.uint8)
         window_ones = np.ones((int(window_rows), int(window_cols)), dtype=np.uint8)
 
         # Note: output matrix is zero padded
         for row in range(row_padding, rows-row_padding, 1):
             for col in range(col_padding, cols-col_padding, 1):
-                if image[row, col]:
+                if self.seg_img[row, col]:
                     start_row = row - row_padding
                     end_row   = row + row_padding + 1
                     start_col = col - col_padding
                     end_col   = col + col_padding + 1
-                    filled = (image[start_row:end_row, start_col:end_col]).sum()
+                    filled = (self.seg_img[start_row:end_row, start_col:end_col]).sum()
                     if filled > 0.50*area:
-                        self.clustered_seg[row,col] = 1
-                        self.clustered_seg_regions[start_row:end_row, start_col:end_col] = window_ones
+                        self.clustered_cores_img[row,col] = 1
+                        self.cluster_regions_img[start_row:end_row, start_col:end_col] = window_ones
 
-        self.labelled_seg_regions, num_regions = measure.label(self.clustered_seg_regions, return_num=True, connectivity=2)
-        self.labelled_clustered_seg = self.labelled_seg_regions * image
+        self.labelled_regions_img, num_regions = measure.label(self.cluster_regions_img, return_num=True, connectivity=2)
+        self.labelled_clustered_img = self.labelled_regions_img * self.seg_img
 
         end = time.time()
         print("End: ", end)
@@ -402,7 +431,7 @@ class PPlumeDetector():
 
         return
 
-    def cluster_seg_scan(self, image):
+    def cluster_seg_scan(self):
         # TODO P1 - Clean up
 
         window_width_m = 0.25
