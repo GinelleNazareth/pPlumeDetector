@@ -28,28 +28,6 @@ num_steps = 1
 speed_of_sound = 1500
 
 
-def create_sonar_images(sector_intensities):
-    '''Rearrages sector intensities matrix to  '''
-
-    # Transpose sector intensities to match required orientation for warping
-    sector_intensities_t = copy.deepcopy(sector_intensities)
-    sector_intensities_t = sector_intensities_t.transpose()
-
-    # Rearrange sector_intensities matrix to match warp co-ordinates (0 is towards right)
-    sector_intensities_mod = copy.deepcopy(sector_intensities_t)
-    sector_intensities_mod[0:100] = sector_intensities_t[300:400]
-    sector_intensities_mod[100:400] = sector_intensities_t[0:300]
-
-    # Warp intensities matrix into circular image
-    radius = 200 # Output image will be 200x200 pixels
-    warp_flags = flags = cv.WARP_INVERSE_MAP + cv.WARP_POLAR_LINEAR + cv.WARP_FILL_OUTLIERS + cv.INTER_LINEAR
-    #warp_flags = flags = cv.WARP_INVERSE_MAP + cv.WARP_POLAR_LINEAR + cv.WARP_FILL_OUTLIERS + cv.INTER_NEAREST
-    warped_image = cv.warpPolar(sector_intensities_mod, center=(radius, radius), maxRadius=radius, dsize=(2 * radius, 2 * radius),
-                          flags=warp_flags)
-
-    return warped_image
-
-
 if __name__ == "__main__":
 
     # Parse arguments
@@ -118,25 +96,13 @@ if __name__ == "__main__":
             print('Range: ', range)
 
             # Create warped (polar) images
-            warped = create_sonar_images(plume_detector.scan_intensities)
-            denoised_warped = create_sonar_images(plume_detector.scan_intensities_denoised)
-
-            start = time.time()
-            print("Start: ", start)
-            seg_warped = create_sonar_images(plume_detector.seg_scan)
-            end = time.time()
-            print("End: ", end)
-            print("Warping time is ", end - start)
-
-            # Clustering
-            #X, db = plume_detector.cluster_seg_scan(seg_warped)
-            plume_detector.cluster_seg_scan_square_window(seg_warped)
-            clustered_seg_warped = 255*plume_detector.clustered_seg
+            warped = plume_detector.create_sonar_image(plume_detector.scan_intensities)
+            denoised_warped = plume_detector.create_sonar_image(plume_detector.scan_intensities_denoised)
 
             # Setup plot
             fig = plt.figure()
             suptitle = 'Scan ' + str(scan_num) + ' (Start time: ' + start_timestamp + ', End time: ' + timestamp + ')'
-            plt.suptitle(suptitle)
+            #plt.suptitle(suptitle)
             plt.axis('off')
 
             # Labels and label positions for warped images
@@ -147,23 +113,22 @@ if __name__ == "__main__":
             y_labels    = [str(range_m_int), str(0.5*range_m_int), '0', str(0.5*range_m_int), str(range_m_int)]
 
             # 1: Original data, warped
-            ax = fig.add_subplot(2, 3, 1)
-            #plt.imshow(warped, interpolation='bilinear',cmap='jet')
+            ax = fig.add_subplot(3, 2, 1)
             plt.imshow(warped, interpolation='none', cmap='jet')
             ax.title.set_text('1: Original')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
             # 2: Denoised data
-            ax = fig.add_subplot(2, 3, 2)
+            ax = fig.add_subplot(3, 2, 2)
             plt.imshow(denoised_warped, interpolation='none',cmap='jet')
             ax.title.set_text('2: Denoised')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
             # 3: Segmented data
-            ax = fig.add_subplot(2, 3, 3)
-            image = seg_warped.astype(float)
+            ax = fig.add_subplot(3, 2, 3)
+            image = plume_detector.seg_img.astype(float)
             image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
             plt.imshow(image, interpolation='none',cmap='RdYlBu')
             ax.title.set_text('3: Segmented')
@@ -171,18 +136,17 @@ if __name__ == "__main__":
             ax.set_yticks(y_label_pos, labels= y_labels)
 
             # 4: Clustered Cores
-            ax = fig.add_subplot(2, 3, 4)
-            image = plume_detector.clustered_seg.astype(float)
+            ax = fig.add_subplot(3, 2, 4)
+            image = plume_detector.clustered_cores_img.astype(float)
             image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
             plt.imshow(image, interpolation='none',cmap='RdYlBu')
             ax.title.set_text('4: Clustered Cores')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
-
             # 5: Labelled Regions
-            ax = fig.add_subplot(2, 3, 5)
-            image = plume_detector.labelled_seg_regions.astype(float)
+            ax = fig.add_subplot(3, 2, 5)
+            image = plume_detector.labelled_regions_img.astype(float)
             image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
             plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
             ax.title.set_text('5: Labelled Regions')
@@ -191,8 +155,8 @@ if __name__ == "__main__":
             ax.set_aspect('equal')
 
             # 6: Final Output
-            ax = fig.add_subplot(2, 3, 6)
-            image = plume_detector.labelled_clustered_seg.astype(float)
+            ax = fig.add_subplot(3, 2, 6)
+            image = plume_detector.labelled_clustered_img.astype(float)
             image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
             plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
             ax.title.set_text('6: Labelled Clusters')
@@ -200,10 +164,60 @@ if __name__ == "__main__":
             ax.set_yticks(y_label_pos, labels= y_labels)
             ax.set_aspect('equal')
 
-
+            fig.tight_layout()
             plt.show()
             #plt.savefig(os.path.join(img_save_path, suptitle))
 
             start_timestamp = ""
+
+
+            # Clustering
+            fig = plt.figure()
+            X, db = plume_detector.cluster_seg_scan()
+
+            core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
+            core_samples_mask[db.core_sample_indices_] = True
+            labels = db.labels_
+
+            # Number of clusters in labels, ignoring noise if present.
+            n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
+            n_noise_ = list(labels).count(-1)
+
+            print("Estimated number of clusters: %d" % n_clusters_)
+            print("Estimated number of noise points: %d" % n_noise_)
+
+            # Black removed and is used for noise instead.
+            unique_labels = set(labels)
+            colors = [plt.cm.Spectral(each) for each in np.linspace(0, 1, len(unique_labels))]
+            for k, col in zip(unique_labels, colors):
+                if k == -1:
+                    # Black used for noise.
+                    col = [0, 0, 0, 1]
+
+                class_member_mask = labels == k
+
+                xy = X[class_member_mask & core_samples_mask]
+                plt.plot(
+                    xy[:, 0],
+                    xy[:, 1],
+                    "o",
+                    markerfacecolor=tuple(col),
+                    markeredgecolor="k",
+                    markersize=4,
+                )
+
+                xy = X[class_member_mask & ~core_samples_mask]
+                plt.plot(
+                    xy[:, 0],
+                    xy[:, 1],
+                    "o",
+                    markerfacecolor=tuple(col),
+                    markeredgecolor="k",
+                    markersize=2,
+                )
+
+            plt.title("Estimated number of clusters: %d" % n_clusters_)
+            plt.show()
+
 
 
