@@ -24,10 +24,15 @@ class PPlumeDetector():
 
         # Constants
         self.k_const = 2 #Threshold for each ping = mean + K*std.dev
+        self.window_width_m = 0.5
+        self.cluster_min_fill_percent = 50
         self.threshold_min = 0.5*255
         self.threshold_max = 0.95 * 255
         self.grads_to_rads = np.pi/200
         self.threshold = 0.5*255
+
+        self.window_width_pixels = None
+        self.cluster_min_pixels = None
 
         self.comms = pymoos.comms()
 
@@ -285,7 +290,7 @@ class PPlumeDetector():
             # Warp data into image with cartesian co-ordinates
             self.seg_img = self.create_sonar_image(self.seg_scan)
 
-            self.cluster_seg_scan_square_window()
+            self.cluster()
 
             # Reset valid flags for new data
             self.scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
@@ -378,32 +383,33 @@ class PPlumeDetector():
 
         return warped_image
 
-    def cluster_seg_scan_square_window(self):
+    def cluster(self):
         '''Applies a square window clustering method to self.seg_img, and stores the image with the labelled clustered
         pixels as labelled_clustered_img'''
 
-        window_width_m = 0.5
         image_width_pixels = self.seg_img.shape[1] # Assumes square image
         range_m = self.calc_range(self.num_samples)
-        window_width_pixels = window_width_m * image_width_pixels / (2 * range_m)
-        window_width_pixels = 2*math.floor(window_width_pixels/2) + 1 # Window size should be an odd number
-        print("Window width is ", window_width_pixels)
+        self.window_width_pixels = self.window_width_m * image_width_pixels / (2 * range_m)
+        self.window_width_pixels = 2*math.floor(self.window_width_pixels/2) + 1 # Window size should be an odd number
+        print("Window width is ", self.window_width_pixels)
 
-        if window_width_pixels < 3:
+        if self.window_width_pixels < 3:
             print('Clipping clustering window with to 3 pixels (minimum)')
-            window_width_pixels = 3
+            self.window_width_pixels = 3
 
         start = time.time()
         print("Start: ", start)
 
-        window_rows = window_width_pixels
-        window_cols = window_width_pixels
+        window_rows = self.window_width_pixels
+        window_cols = self.window_width_pixels
         area = window_rows*window_cols
+        self.cluster_min_pixels = self.cluster_min_fill_percent*area/100
+
         row_padding = math.floor(window_rows / 2)
         col_padding = math.floor(window_cols / 2)
-
         rows = self.seg_img.shape[0]
         cols = self.seg_img.shape[1]
+
         self.clustered_cores_img = np.zeros((rows, cols), dtype=np.uint8)
         self.cluster_regions_img = np.zeros((rows, cols), dtype=np.uint8)
         self.labelled_clustered_img = np.zeros((rows, cols), dtype=np.uint8)
@@ -418,7 +424,7 @@ class PPlumeDetector():
                     start_col = col - col_padding
                     end_col   = col + col_padding + 1
                     filled = (self.seg_img[start_row:end_row, start_col:end_col]).sum()
-                    if filled > 0.50*area:
+                    if filled > self.cluster_min_pixels:
                         self.clustered_cores_img[row,col] = 1
                         self.cluster_regions_img[start_row:end_row, start_col:end_col] = window_ones
 
@@ -430,38 +436,6 @@ class PPlumeDetector():
         print("Clustering time is ", end-start)
 
         return
-
-    def cluster_seg_scan(self):
-        # TODO P1 - Clean up
-
-        window_width_m = 0.25
-        image_width_pixels = image.shape[1] # Assumes square image
-        range_m = self.calc_range(self.num_samples)
-        window_width_pixels = window_width_m * image_width_pixels / (2 * range_m) # Image width is 2* range
-        print("Window width is ", window_width_pixels)
-
-        # From the image, extract the list of points (detections above the threshold)
-        num_points = self.seg_scan.sum()
-        points = np.zeros(shape=(num_points,2))
-        index = 0
-        for row in range(image.shape[0]):
-            for col in range(image.shape[1]):
-                if image[row,col]:
-                    #points[index] = [self.cart_x[row,col], self.cart_y[row,col]]
-                    #points[index] = [row, col]
-                    points[index] = [col, row]
-                    index = index + 1
-
-        start = time.time()
-        print("Start: ", start)
-
-        db = DBSCAN(eps=window_width_pixels, min_samples=6).fit(points)
-
-        end = time.time()
-        print("End: ", end)
-        print("DBSCAN time is ", end-start)
-
-        return points, db
 
     def calc_range(self, sample_num):
         '''Calculates the one-way range (meters) for the specified sample number'''
