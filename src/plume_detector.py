@@ -1,16 +1,11 @@
 import copy
-import sys
 import time
 import pymoos
 import math
 import numpy as np
-from brping import PingMessage
 from brping import PingParser
 from brping import definitions
-from datetime import datetime
-from sklearn.cluster import DBSCAN
 from skimage import measure
-import numpy.ma as ma
 import cv2 as cv
 
 # Limitations
@@ -246,40 +241,10 @@ class PPlumeDetector():
         print ("PPlumeDetector configured with {0} scanning field".format(self.seg_scan.shape))
         return
 
-    def init_cart_xy(self):
-        '''Calculates cartesian x-y co-ordinates of each point in the sector scan, and stores them in self.cart_x, self.cart_y'''
-
-        self.cart_x = np.zeros((self.num_samples, len(self.scan_angles)))
-        self.cart_y = np.zeros((self.num_samples, len(self.scan_angles)))
-
-        for sample_num in range(self.num_samples):
-            for col, ping360_angle_grads in enumerate(self.scan_angles):
-
-                range_m = self.calc_range(sample_num)
-
-                # Convert angle from ping360 reference (0 towards bottom, clockwise rotation) to standard reference (0 towards
-                # right, counter-clockwise rotation)
-                angle_grads = 300 - ping360_angle_grads
-                if angle_grads < 0:
-                    angle_grads = angle_grads + 400
-
-                # Convert angle in gradians to angle in radians
-                angle_rads = angle_grads * 360 / 400 * math.pi / 180
-
-                # Convert polar to cartesian co-ordinates
-                self.cart_x[sample_num, col] = range_m * math.cos(angle_rads)
-                self.cart_y[sample_num, col] = range_m * math.sin(angle_rads)
-
-
     def process_ping_data(self):
 
         if not self.decode_device_data_msg():
             return False
-
-        # If not done, initialize arrays with cartesian x-y co-ordinates of each point in the sector scan
-        # Done here because the sample period from the device data message is required for calculating ranges
-        if self.cart_x is None:
-            self.init_cart_xy()
 
         if not self.update_scan_intensities():
             return False
