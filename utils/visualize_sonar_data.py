@@ -4,10 +4,7 @@ from argparse import ArgumentParser
 from datetime import datetime
 from src.plume_detector import PPlumeDetector
 import numpy as np
-import cv2 as cv
 import time
-import math
-import copy
 import os
 import re
 from matplotlib import rcParams
@@ -87,6 +84,9 @@ if __name__ == "__main__":
 
         # Display data at the end of each sector scan
         if angle == 199:
+
+            while plume_detector.scan_complete:
+                time.sleep(0.1)
 
             scan_num += 1
             print('Scan:', scan_num)
