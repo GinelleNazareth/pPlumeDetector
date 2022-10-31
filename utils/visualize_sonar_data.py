@@ -4,10 +4,7 @@ from argparse import ArgumentParser
 from datetime import datetime
 from src.plume_detector import PPlumeDetector
 import numpy as np
-import cv2 as cv
 import time
-import math
-import copy
 import os
 import re
 from matplotlib import rcParams
@@ -87,6 +84,10 @@ if __name__ == "__main__":
 
         # Display data at the end of each sector scan
         if angle == 199:
+
+            # Call functions to create an image of the scan and cluster it
+            plume_detector.seg_img = plume_detector.create_sonar_image(plume_detector.seg_scan_snapshot)
+            plume_detector.cluster()
 
             scan_num += 1
             print('Scan:', scan_num)
@@ -169,7 +170,3 @@ if __name__ == "__main__":
             #plt.savefig(os.path.join(img_save_path, suptitle))
 
             start_timestamp = ""
-
-
-
-
