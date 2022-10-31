@@ -52,6 +52,7 @@ class PPlumeDetector():
         # Matrix containing segmented data (i.e. result from thresholding) from the scan of the entire sonar swath.
         # Row indexes define the sample number and each column is for a different scan angle
         self.seg_scan = None
+        self.seg_scan_snapshot = None # Copy of seg scan, taken at start/stop angle
 
         self.seg_img = None           # self.seg_scan warped into an image (re-gridded to cartesian grid)
         self.clustered_cores_img = None # Image with core cluster pixels (percentage of pixels in surrounding > threshold)
@@ -65,6 +66,7 @@ class PPlumeDetector():
         self.scan_angles = None # Array containing scan angles (gradians) for each column of the seg_scan matrix
         self.full_scans = 0
         self.first_scan = True
+        self.scan_complete = False
 
         # Cartesian x-y co-ordinates of each point in the sector scan
         self.cart_x = None
@@ -96,8 +98,21 @@ class PPlumeDetector():
         self.comms.set_on_mail_callback(self.on_mail)
         self.comms.run('localhost', 9000, 'p_plume_detector')
         while True:
-            time.sleep(0.1) #TODO P1: Reduce sleep time?
+            time.sleep(0.02) # 50Hz
             #TODO P1: Check for timeout if in active State
+
+            if self.scan_complete:
+
+                # Warp data into image with cartesian co-ordinates
+                self.seg_img = self.create_sonar_image(self.seg_scan_snapshot)
+
+                self.cluster()
+
+                self.scan_complete = False
+
+                # Call clustering functions
+
+
 
         return
 
@@ -113,7 +128,7 @@ class PPlumeDetector():
 
         if success:
             self.set_state('DB_CONNECTED')
-            self.status('GOOD')
+            self.set_status('GOOD')
         else:
             self.set_state('DB_REGISTRATION_ERROR')
             self.set_status('DB_REGISTRATION_ERROR')
@@ -179,7 +194,7 @@ class PPlumeDetector():
                 else:
                     self.set_status('PROCESSING_ERROR')
 
-        return
+        return True
 
     def save_input_var(self, msg):
         '''Saves message data in correct class var. Also sets 'ready_for_config' if all config vars received'''
@@ -205,11 +220,14 @@ class PPlumeDetector():
             elif name == 'SONAR_SPEED_OF_SOUND':
                 self.speed_of_sound = val
 
-        # Class can be configured once all the vars have been set
-        if self.num_samples and self.num_steps and self.start_angle_grads and self.stop_angle_grads and self.speed_of_sound:
-            print("Config vars:samples: {0}, steps: {1}, start: {2}, stop: {3}, speed of sound: {4}".format(self.num_samples,
-                    self.num_steps, self.start_angle_grads, self.stop_angle_grads, self.speed_of_sound))
-            self.ready_for_config = True
+            required_vars = [self.num_samples, self.num_steps, self.start_angle_grads, self.stop_angle_grads, self.speed_of_sound]
+
+            # Class can be configured once all the vars have been set
+            if all(item is not None for item in required_vars):
+            #if self.num_samples and self.num_steps and self.start_angle_grads and self.stop_angle_grads and self.speed_of_sound:
+                print("Config vars:samples: {0}, steps: {1}, start: {2}, stop: {3}, speed of sound: {4}".format(self.num_samples,
+                        self.num_steps, self.start_angle_grads, self.stop_angle_grads, self.speed_of_sound))
+                self.ready_for_config = True
 
         return
 
@@ -252,17 +270,16 @@ class PPlumeDetector():
         # Process the data when at the start/stop angles
         if self.device_data_msg.angle in self.scan_processing_angles:
 
-            # Warp data into image with cartesian co-ordinates
-            self.seg_img = self.create_sonar_image(self.seg_scan)
-
-            self.cluster()
+            # Copy data and set flag for clustering to be completed in the run thread
+            self.seg_scan_snapshot = copy.deepcopy(self.seg_scan)
+            self.scan_complete = True
 
             # Reset valid flags for new data
             self.scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
 
             # TODO P1 - Also reset sector_intensities, but leave beginning/end (also reset valid flag to match)
 
-        return False
+        return True
 
 
     def decode_device_data_msg(self):
@@ -322,6 +339,8 @@ class PPlumeDetector():
 
         # Segment data
         self.seg_scan[:,scanned_index] = (self.scan_intensities_denoised[:,scanned_index]  > self.threshold).astype(np.uint8)
+
+        print('Angle: ' + str(scanned_angle))
 
         return True
 
@@ -417,11 +436,7 @@ class PPlumeDetector():
 
 
 
+if __name__ == "__main__":
 
-
-
-
-
-
-
-
+    plume_detector = PPlumeDetector()
+    plume_detector.run()
