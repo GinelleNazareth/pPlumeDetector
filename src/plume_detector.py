@@ -66,7 +66,7 @@ class PPlumeDetector():
         self.scan_angles = None # Array containing scan angles (gradians) for each column of the seg_scan matrix
         self.full_scans = 0
         self.first_scan = True
-        self.scan_complete = False
+        self.clustering_pending = False
 
         # Cartesian x-y co-ordinates of each point in the sector scan
         self.cart_x = None
@@ -97,22 +97,20 @@ class PPlumeDetector():
         self.comms.set_on_connect_callback(self.on_connect)
         self.comms.set_on_mail_callback(self.on_mail)
         self.comms.run('localhost', 9000, 'p_plume_detector')
+
         while True:
-            time.sleep(0.02) # 50Hz
-            #TODO P1: Check for timeout if in active State
 
-            if self.scan_complete:
+            # Process scan when ping data from start/end of scan is received
+            if self.clustering_pending:
 
-                # Warp data into image with cartesian co-ordinates
+                # Warp data into image with cartesian co-ordinates, then cluster
                 self.seg_img = self.create_sonar_image(self.seg_scan_snapshot)
-
                 self.cluster()
 
-                self.scan_complete = False
+                self.clustering_pending = False
 
-                # Call clustering functions
-
-
+            time.sleep(0.02)  # 50Hz
+            # TODO P1: Check for timeout if in active State
 
         return
 
@@ -150,8 +148,11 @@ class PPlumeDetector():
     def set_status(self, status_string_local):
         ''' Sets the status_string class var, and updates the PLUME_DETECTOR_STATUS_STRING and PLUME_DETECTOR_STATUS_NUM
         MOOS DB vars if the DB is connected'''
+
+        if self.status_string != status_string_local:
+            print("Status: {0}".format(self.status_string))
+
         self.status_string = status_string_local
-        print("Status: {0}".format(self.status_string))
 
         if self.states[self.state_string] > self.states['DB_DISCONNECTED']:
             self.comms.notify('PLUME_DETECTOR_STATUS_STRING', self.status_string, pymoos.time())
@@ -272,7 +273,7 @@ class PPlumeDetector():
 
             # Copy data and set flag for clustering to be completed in the run thread
             self.seg_scan_snapshot = copy.deepcopy(self.seg_scan)
-            self.scan_complete = True
+            self.clustering_pending = True
 
             # Reset valid flags for new data
             self.scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
