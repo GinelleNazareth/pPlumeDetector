@@ -105,7 +105,7 @@ class PPlumeDetector():
 
         # Create directory for saving images
         date_time = datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')
-        folder_name = f"""sonar_data_plots_{date_time}"""
+        folder_name = "sonar_data_plots_" + date_time
         parent_dir = "./"
         self.img_save_path = os.path.join(parent_dir, folder_name)
 
