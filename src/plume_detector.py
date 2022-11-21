@@ -480,15 +480,15 @@ class PPlumeDetector():
         ax = fig.add_subplot(2, 3, 1)
         plt.imshow(warped, interpolation='none', cmap='jet')
         ax.title.set_text('1: Original')
-        ax.set_xticks(x_label_pos, labels=x_labels)
-        ax.set_yticks(y_label_pos, labels=y_labels)
+        ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
+        ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
 
         # 2: Denoised data
         ax = fig.add_subplot(2, 3, 2)
         plt.imshow(denoised_warped, interpolation='none', cmap='jet')
         ax.title.set_text('2: Denoised')
-        ax.set_xticks(x_label_pos, labels=x_labels)
-        ax.set_yticks(y_label_pos, labels=y_labels)
+        ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
+        ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
 
         # 3: Segmented data
         ax = fig.add_subplot(2, 3, 3)
@@ -496,8 +496,8 @@ class PPlumeDetector():
         image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
         plt.imshow(image, interpolation='none', cmap='RdYlBu')
         ax.title.set_text('3: Segmented')
-        ax.set_xticks(x_label_pos, labels=x_labels)
-        ax.set_yticks(y_label_pos, labels=y_labels)
+        ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
+        ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
 
         # 4: Clustered Cores
         ax = fig.add_subplot(2, 3, 4)
@@ -505,8 +505,8 @@ class PPlumeDetector():
         image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
         plt.imshow(image, interpolation='none', cmap='RdYlBu')
         ax.title.set_text('4: Clustered Cores')
-        ax.set_xticks(x_label_pos, labels=x_labels)
-        ax.set_yticks(y_label_pos, labels=y_labels)
+        ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
+        ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
 
         # 5: Labelled Regions
         ax = fig.add_subplot(2, 3, 5)
@@ -514,8 +514,8 @@ class PPlumeDetector():
         image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
         plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
         ax.title.set_text('5: Labelled Regions')
-        ax.set_xticks(x_label_pos, labels=x_labels)
-        ax.set_yticks(y_label_pos, labels=y_labels)
+        ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
+        ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
         ax.set_aspect('equal')
 
         # 6: Final Output
@@ -524,13 +524,14 @@ class PPlumeDetector():
         image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
         plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
         ax.title.set_text('6: Labelled Clusters')
-        ax.set_xticks(x_label_pos, labels=x_labels)
-        ax.set_yticks(y_label_pos, labels=y_labels)
+        ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
+        ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
         ax.set_aspect('equal')
 
         fig.tight_layout()
         #plt.show()
         plt.savefig(os.path.join(self.img_save_path, suptitle))
+        plt.close()
 
 
 
