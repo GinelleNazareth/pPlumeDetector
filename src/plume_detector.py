@@ -3,10 +3,13 @@ import time
 import pymoos
 import math
 import numpy as np
+from datetime import datetime
 from brping import PingParser
 from brping import definitions
 from skimage import measure
 import cv2 as cv
+from matplotlib import pyplot as plt
+import os
 
 # Limitations
 # 1) Processes data as it comes in, regardless of timeouts/power cycles, as
@@ -64,7 +67,7 @@ class PPlumeDetector():
         self.scan_valid_cols = None
 
         self.scan_angles = None # Array containing scan angles (gradians) for each column of the seg_scan matrix
-        self.full_scans = 0
+        self.num_scans = 0
         self.first_scan = True
         self.clustering_pending = False
 
@@ -74,6 +77,8 @@ class PPlumeDetector():
 
         # Indicates whether all the config vars have been received, and the class data structures can be configured
         self.ready_for_config = False
+
+        self.img_save_path = None
 
         self.state_string= 'DB_DISCONNECTED'
         self.states = {
@@ -98,6 +103,17 @@ class PPlumeDetector():
         self.comms.set_on_mail_callback(self.on_mail)
         self.comms.run('localhost', 9000, 'p_plume_detector')
 
+        # Create directory for saving images
+        date_time = datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')
+        folder_name = f"""sonar_data_plots_{date_time}"""
+        parent_dir = "./"
+        self.img_save_path = os.path.join(parent_dir, folder_name)
+
+        try:
+            os.mkdir(self.img_save_path)
+        except OSError as error:
+            print(error)
+
         while True:
 
             # Process scan when ping data from start/end of scan is received
@@ -106,8 +122,9 @@ class PPlumeDetector():
                 # Warp data into image with cartesian co-ordinates, then cluster
                 self.seg_img = self.create_sonar_image(self.seg_scan_snapshot)
                 self.cluster()
-
                 self.clustering_pending = False
+
+                self.create_plots()
 
             time.sleep(0.02)  # 50Hz
             # TODO P1: Check for timeout if in active State
@@ -271,6 +288,8 @@ class PPlumeDetector():
         # Process the data when at the start/stop angles
         if self.device_data_msg.angle in self.scan_processing_angles:
 
+            self.num_scans = self.num_scans + 1
+
             # Copy data and set flag for clustering to be completed in the run thread
             self.seg_scan_snapshot = copy.deepcopy(self.seg_scan)
             self.clustering_pending = True
@@ -341,7 +360,7 @@ class PPlumeDetector():
         # Segment data
         self.seg_scan[:,scanned_index] = (self.scan_intensities_denoised[:,scanned_index]  > self.threshold).astype(np.uint8)
 
-        print('Angle: ' + str(scanned_angle))
+        #print('Angle: ' + str(scanned_angle))
 
         return True
 
@@ -383,7 +402,7 @@ class PPlumeDetector():
             self.window_width_pixels = 3
 
         start = time.time()
-        print("Start: ", start)
+        #print("Start: ", start)
 
         window_rows = self.window_width_pixels
         window_cols = self.window_width_pixels
@@ -417,7 +436,7 @@ class PPlumeDetector():
         self.labelled_clustered_img = self.labelled_regions_img * self.seg_img
 
         end = time.time()
-        print("End: ", end)
+        #print("End: ", end)
         print("Clustering time is ", end-start)
 
         return
@@ -434,6 +453,84 @@ class PPlumeDetector():
         range = (sample_period_sec * sample_num * self.speed_of_sound) / 2
 
         return range
+
+    def create_plots(self):
+
+        range_m = self.calc_range(self.num_samples)
+        range_m_int = round(range_m)
+
+        # Create warped (polar) images
+        warped = self.create_sonar_image(self.scan_intensities)
+        denoised_warped = self.create_sonar_image(self.scan_intensities_denoised)
+
+        # Setup plot
+        fig = plt.figure()
+        suptitle = 'Scan ' + str(self.num_scans)
+        plt.suptitle(suptitle)
+        plt.axis('off')
+
+        # Labels and label positions for warped images
+        rows, cols = warped.shape[0], warped.shape[1]
+        x_label_pos = [0, 0.25 * cols, 0.5 * cols, 0.75 * cols, cols]
+        x_labels = [str(range_m_int), str(0.5 * range_m_int), '0', str(0.5 * range_m_int), str(range_m_int)]
+        y_label_pos = [0, 0.25 * rows, 0.5 * rows, 0.75 * rows, rows]
+        y_labels = [str(range_m_int), str(0.5 * range_m_int), '0', str(0.5 * range_m_int), str(range_m_int)]
+
+        # 1: Original data, warped
+        ax = fig.add_subplot(2, 3, 1)
+        plt.imshow(warped, interpolation='none', cmap='jet')
+        ax.title.set_text('1: Original')
+        ax.set_xticks(x_label_pos, labels=x_labels)
+        ax.set_yticks(y_label_pos, labels=y_labels)
+
+        # 2: Denoised data
+        ax = fig.add_subplot(2, 3, 2)
+        plt.imshow(denoised_warped, interpolation='none', cmap='jet')
+        ax.title.set_text('2: Denoised')
+        ax.set_xticks(x_label_pos, labels=x_labels)
+        ax.set_yticks(y_label_pos, labels=y_labels)
+
+        # 3: Segmented data
+        ax = fig.add_subplot(2, 3, 3)
+        image = self.seg_img.astype(float)
+        image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
+        plt.imshow(image, interpolation='none', cmap='RdYlBu')
+        ax.title.set_text('3: Segmented')
+        ax.set_xticks(x_label_pos, labels=x_labels)
+        ax.set_yticks(y_label_pos, labels=y_labels)
+
+        # 4: Clustered Cores
+        ax = fig.add_subplot(2, 3, 4)
+        image = self.clustered_cores_img.astype(float)
+        image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
+        plt.imshow(image, interpolation='none', cmap='RdYlBu')
+        ax.title.set_text('4: Clustered Cores')
+        ax.set_xticks(x_label_pos, labels=x_labels)
+        ax.set_yticks(y_label_pos, labels=y_labels)
+
+        # 5: Labelled Regions
+        ax = fig.add_subplot(2, 3, 5)
+        image = self.labelled_regions_img.astype(float)
+        image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
+        plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
+        ax.title.set_text('5: Labelled Regions')
+        ax.set_xticks(x_label_pos, labels=x_labels)
+        ax.set_yticks(y_label_pos, labels=y_labels)
+        ax.set_aspect('equal')
+
+        # 6: Final Output
+        ax = fig.add_subplot(2, 3, 6)
+        image = self.labelled_clustered_img.astype(float)
+        image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
+        plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
+        ax.title.set_text('6: Labelled Clusters')
+        ax.set_xticks(x_label_pos, labels=x_labels)
+        ax.set_yticks(y_label_pos, labels=y_labels)
+        ax.set_aspect('equal')
+
+        fig.tight_layout()
+        #plt.show()
+        plt.savefig(os.path.join(self.img_save_path, suptitle))
 
 
 
