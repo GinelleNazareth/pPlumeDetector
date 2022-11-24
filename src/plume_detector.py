@@ -37,8 +37,10 @@ class PPlumeDetector():
         # Vars for storing data from MOOS DB
         self.num_samples = None
         self.num_steps = None
-        self.start_angle_grads = None
-        self.stop_angle_grads = None
+        self.start_angle_grads = 0
+        self.stop_angle_grads = 399
+        self.sonar_start_angle_grads = None
+        self.sonar_stop_angle_grads = None
         self.transmit_enable = None
         self.speed_of_sound = None
         self.binary_device_data_msg = None # Encoded PING360_DEVICE_DATA message
@@ -230,21 +232,21 @@ class PPlumeDetector():
             elif name == 'SONAR_NUM_STEPS':
                 self.num_steps = val
             elif name == 'SONAR_START_ANGLE_GRADS':
-                self.start_angle_grads = val
+                self.sonar_start_angle_grads = val
             elif name == 'SONAR_STOP_ANGLE_GRADS':
-                self.stop_angle_grads = val
+                self.sonar_stop_angle_grads = val
             elif name == 'SONAR_TRANSMIT_ENABLE':
                 self.transmit_enable = val
             elif name == 'SONAR_SPEED_OF_SOUND':
                 self.speed_of_sound = val
 
-            required_vars = [self.num_samples, self.num_steps, self.start_angle_grads, self.stop_angle_grads, self.speed_of_sound]
+            required_vars = [self.num_samples, self.num_steps, self.sonar_start_angle_grads, self.sonar_stop_angle_grads, self.speed_of_sound]
 
             # Class can be configured once all the vars have been set
             if all(item is not None for item in required_vars):
             #if self.num_samples and self.num_steps and self.start_angle_grads and self.stop_angle_grads and self.speed_of_sound:
                 print("Config vars:samples: {0}, steps: {1}, start: {2}, stop: {3}, speed of sound: {4}".format(self.num_samples,
-                        self.num_steps, self.start_angle_grads, self.stop_angle_grads, self.speed_of_sound))
+                        self.num_steps, self.sonar_start_angle_grads, self.sonar_stop_angle_grads, self.speed_of_sound))
                 self.ready_for_config = True
 
         return
@@ -272,7 +274,7 @@ class PPlumeDetector():
         self.seg_scan = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
         self.scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
 
-        self.scan_processing_angles = [self.start_angle_grads, self.stop_angle_grads]
+        self.scan_processing_angles = [self.sonar_start_angle_grads, self.sonar_stop_angle_grads]
 
         print ("PPlumeDetector configured with {0} scanning field".format(self.seg_scan.shape))
         return
