@@ -291,6 +291,8 @@ class PPlumeDetector():
         if self.device_data_msg.angle in self.scan_processing_angles:
 
             self.num_scans = self.num_scans + 1
+            self.comms.notify('PLUME_DETECTOR_NUM_SCANS', self.num_scans, pymoos.time())
+
 
             # Copy data and set flag for clustering to be completed in the run thread
             self.seg_scan_snapshot = copy.deepcopy(self.seg_scan)
@@ -397,11 +399,12 @@ class PPlumeDetector():
         range_m = self.calc_range(self.num_samples)
         self.window_width_pixels = self.window_width_m * image_width_pixels / (2 * range_m)
         self.window_width_pixels = 2*math.floor(self.window_width_pixels/2) + 1 # Window size should be an odd number
-        print("Window width is ", self.window_width_pixels)
 
         if self.window_width_pixels < 3:
             print('Clipping clustering window with to 3 pixels (minimum)')
             self.window_width_pixels = 3
+
+        self.comms.notify('PLUME_DETECTOR_WINDOW_WIDTH', self.window_width_pixels, pymoos.time())
 
         start = time.time()
         #print("Start: ", start)
@@ -439,7 +442,10 @@ class PPlumeDetector():
 
         end = time.time()
         #print("End: ", end)
-        print("Clustering time is ", end-start)
+        clustering_time = end - start
+        clustering_print_str = 'Scan ' + str(self.num_scans) + ": Clustering time is " + str(clustering_time) + " secs"
+        print(clustering_print_str)
+        #print("Clustering time is ", end-start)
 
         return
 
