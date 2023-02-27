@@ -88,6 +88,7 @@ if __name__ == "__main__":
             # Call functions to create an image of the scan and cluster it
             plume_detector.seg_img = plume_detector.create_sonar_image(plume_detector.seg_scan_snapshot)
             plume_detector.cluster()
+            plume_detector.calc_cluster_centers()
 
             scan_num += 1
             print('Scan:', scan_num)
@@ -114,21 +115,21 @@ if __name__ == "__main__":
             y_labels    = [str(range_m_int), str(0.5*range_m_int), '0', str(0.5*range_m_int), str(range_m_int)]
 
             # 1: Original data, warped
-            ax = fig.add_subplot(3, 2, 1)
+            ax = fig.add_subplot(2, 3, 1)
             plt.imshow(warped, interpolation='none', cmap='jet')
             ax.title.set_text('1: Original')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
             # 2: Denoised data
-            ax = fig.add_subplot(3, 2, 2)
+            ax = fig.add_subplot(2, 3, 2)
             plt.imshow(denoised_warped, interpolation='none',cmap='jet')
             ax.title.set_text('2: Denoised')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
             # 3: Segmented data
-            ax = fig.add_subplot(3, 2, 3)
+            ax = fig.add_subplot(2, 3, 3)
             image = plume_detector.seg_img.astype(float)
             image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
             plt.imshow(image, interpolation='none',cmap='RdYlBu')
@@ -137,7 +138,7 @@ if __name__ == "__main__":
             ax.set_yticks(y_label_pos, labels= y_labels)
 
             # 4: Clustered Cores
-            ax = fig.add_subplot(3, 2, 4)
+            ax = fig.add_subplot(2, 3, 4)
             image = plume_detector.clustered_cores_img.astype(float)
             image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
             plt.imshow(image, interpolation='none',cmap='RdYlBu')
@@ -146,7 +147,7 @@ if __name__ == "__main__":
             ax.set_yticks(y_label_pos, labels= y_labels)
 
             # 5: Labelled Regions
-            ax = fig.add_subplot(3, 2, 5)
+            ax = fig.add_subplot(2, 3, 5)
             image = plume_detector.labelled_regions_img.astype(float)
             image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
             plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
@@ -155,9 +156,14 @@ if __name__ == "__main__":
             ax.set_yticks(y_label_pos, labels= y_labels)
             ax.set_aspect('equal')
 
+            # Label positions for output images - different because images are larger
+            rows, cols = plume_detector.output_img.shape[0], plume_detector.output_img.shape[1]
+            x_label_pos = [0, 0.25*cols, 0.5*cols, 0.75*cols, cols]
+            y_label_pos = [0, 0.25*rows, 0.5*rows, 0.75*rows, rows]
+
             # 6: Final Output
-            ax = fig.add_subplot(3, 2, 6)
-            image = plume_detector.labelled_clustered_img.astype(float)
+            ax = fig.add_subplot(2, 3, 6)
+            image = plume_detector.output_img.astype(float)
             image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
             plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
             ax.title.set_text('6: Labelled Clusters')
@@ -166,7 +172,23 @@ if __name__ == "__main__":
             ax.set_aspect('equal')
 
             fig.tight_layout()
-            plt.show()
+            #plt.show()
             #plt.savefig(os.path.join(img_save_path, suptitle))
+
+            # # Setup plot
+            ax = plt.figure().add_subplot(1,1,1)
+            suptitle = 'Scan ' + str(scan_num) + ' (Start time: ' + start_timestamp + ', End time: ' + timestamp + ')'
+            plt.suptitle(suptitle)
+            #plt.axis('off')
+
+            # 6: Final Output
+            image = plume_detector.output_img.astype(float)
+            image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
+            plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
+            ax.set_xticks(x_label_pos, labels = x_labels)
+            ax.set_yticks(y_label_pos, labels= y_labels)
+            ax.set_aspect('equal')
+
+            plt.show()
 
             start_timestamp = ""

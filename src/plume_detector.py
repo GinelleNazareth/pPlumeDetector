@@ -17,6 +17,15 @@ import os
 # 2) Num steps, start angle, stop angle and num samples can only be set on startup (however, range can be changed at run time)
 # 3) Can only have one instance of the app running at any time
 
+class Cluster():
+    def __init__(self):
+        self.num_pixels = 0
+        self.center_row = 0
+        self.center_col = 0
+        self.radius_pixels = -1
+
+
+
 class PPlumeDetector():
     def __init__(self):
 
@@ -64,6 +73,7 @@ class PPlumeDetector():
         self.cluster_regions_img = None # Image wth all pixels in clustering windows set to 1  (used for labelling)
         self.labelled_regions_img = None # Cluster regions image, with unique label (pixel value) applied to each region
         self.labelled_clustered_img = None # seg_image * labelled_regions_img
+        self.output_img = None
 
         # Array indicating whether the data in the corresponding columns of the scan_intensities and seg_scan matrices are valid
         self.scan_valid_cols = None
@@ -73,9 +83,8 @@ class PPlumeDetector():
         self.first_scan = True
         self.clustering_pending = False
 
-        # Cartesian x-y co-ordinates of each point in the sector scan
-        self.cart_x = None
-        self.cart_y = None
+        self.num_clusters = 0
+        self.clusters = [] # List of Cluster data structures
 
         # Indicates whether all the config vars have been received, and the class data structures can be configured
         self.ready_for_config = False
@@ -124,6 +133,7 @@ class PPlumeDetector():
                 # Warp data into image with cartesian co-ordinates, then cluster
                 self.seg_img = self.create_sonar_image(self.seg_scan_snapshot)
                 self.cluster()
+                self.calc_cluster_centers()
                 self.clustering_pending = False
 
                 self.create_plots()
@@ -395,36 +405,45 @@ class PPlumeDetector():
         '''Applies a square window clustering method to self.seg_img, and stores the image with the labelled clustered
         pixels as labelled_clustered_img'''
 
+        # Reset class vars
+        self.num_clusters = 0
+        self.clusters = []
+
+        start = time.time()
+
+        # Convert window width from meters to pixels
         image_width_pixels = self.seg_img.shape[1] # Assumes square image
         range_m = self.calc_range(self.num_samples)
         self.window_width_pixels = self.window_width_m * image_width_pixels / (2 * range_m)
         self.window_width_pixels = 2*math.floor(self.window_width_pixels/2) + 1 # Window size should be an odd number
 
+        # Ensure widow width is at least 3 pixels
         if self.window_width_pixels < 3:
             print('Clipping clustering window with to 3 pixels (minimum)')
             self.window_width_pixels = 3
-
         self.comms.notify('PLUME_DETECTOR_WINDOW_WIDTH', self.window_width_pixels, pymoos.time())
 
-        start = time.time()
-        #print("Start: ", start)
-
+        # Convert minimum fill from percentage to pixels
         window_rows = self.window_width_pixels
         window_cols = self.window_width_pixels
         area = window_rows*window_cols
         self.cluster_min_pixels = self.cluster_min_fill_percent*area/100
 
+        # Calculate border padding
         row_padding = math.floor(window_rows / 2)
         col_padding = math.floor(window_cols / 2)
+
+        # TODO P1 - Fix padding
+        # Initialize image matrices
         rows = self.seg_img.shape[0]
         cols = self.seg_img.shape[1]
-
         self.clustered_cores_img = np.zeros((rows, cols), dtype=np.uint8)
         self.cluster_regions_img = np.zeros((rows, cols), dtype=np.uint8)
         self.labelled_clustered_img = np.zeros((rows, cols), dtype=np.uint8)
         window_ones = np.ones((int(window_rows), int(window_cols)), dtype=np.uint8)
 
-        # Note: output matrix is zero padded
+        # Create clustered_cores_img, identifying pixels at the center of high density windows.
+        # Also create cluster_regions_img, identifying high density regions. Note: output matrices are zero padded
         for row in range(row_padding, rows-row_padding, 1):
             for col in range(col_padding, cols-col_padding, 1):
                 if self.seg_img[row, col]:
@@ -437,15 +456,73 @@ class PPlumeDetector():
                         self.clustered_cores_img[row,col] = 1
                         self.cluster_regions_img[start_row:end_row, start_col:end_col] = window_ones
 
-        self.labelled_regions_img, num_regions = measure.label(self.cluster_regions_img, return_num=True, connectivity=2)
+        # Identify and label separate regions
+        self.labelled_regions_img, self.num_clusters = measure.label(self.cluster_regions_img, return_num=True, connectivity=2)
+
+        # Mask input image with the labelled regions image to create the labelled clustered image
         self.labelled_clustered_img = self.labelled_regions_img * self.seg_img
 
+        # Print clustering time
         end = time.time()
-        #print("End: ", end)
         clustering_time = end - start
         clustering_print_str = 'Scan ' + str(self.num_scans) + ": Clustering time is " + str(clustering_time) + " secs"
         print(clustering_print_str)
-        #print("Clustering time is ", end-start)
+
+        return
+
+    def calc_cluster_centers(self):
+        '''Calculates the cluster centers and radii, and draws them on the output image'''
+
+        self.clusters = [Cluster() for i in range(self.num_clusters+1)]
+        self.output_img = copy.deepcopy(self.labelled_clustered_img)
+
+        # Calculate cluster centers and radii
+        for cluster_num in np.arange(1,self.num_clusters+1,1):
+
+            # Get indices of cluster pixels
+            indices = np.nonzero(self.labelled_clustered_img==cluster_num)
+
+            # Calculate center coordinates
+            center_row = indices[0].mean()
+            center_col = indices[1].mean()
+
+            # Find furthest point & calculate cluster radius
+            radius = 0
+            center = (center_row, center_col)
+            for i in range(len(indices[0])):
+                point = (indices[0][i], indices[1][i])
+                dist = math.dist(center, point)
+                if dist > radius:
+                    radius = dist
+
+            # Save values in clusters data structure
+            self.clusters[cluster_num].center_row = center_row
+            self.clusters[cluster_num].center_col = center_col
+            self.clusters[cluster_num].radius_pixels = radius
+
+
+        # Increase image resolution before adding circles so that they are not pixelated
+        scale = 4
+        dim = (int(self.output_img.shape[1]*scale), int(self.output_img.shape[0]*scale))
+        self.output_img = cv.resize(self.output_img, dim, interpolation = cv.INTER_NEAREST)
+        self.output_img = self.output_img.astype(np.uint8)
+        # Increment non-zero pixel values. Allows for '1' to be used for the cluster circles and centers
+        self.output_img = np.where(self.output_img > 0, self.output_img+1, self.output_img)
+
+        # Add cluster centers and circle encompassing the clusters to the image
+        for cluster_num in np.arange(1, self.num_clusters + 1, 1):
+
+            center_row = self.clusters[cluster_num].center_row
+            center_col = self.clusters[cluster_num].center_col
+            radius = self.clusters[cluster_num].radius_pixels
+
+            # Add cluster center to image
+            circle_center = (round(center_col * scale), round(center_row * scale))
+            self.output_img = cv.circle(self.output_img, circle_center, 3, 1, -1)
+
+            # Add circle encompassing the cluster
+            circle_radius = round(radius*scale + scale/2)
+            self.output_img = cv.circle(self.output_img, circle_center, circle_radius,1, 2, cv.LINE_8)
 
         return
 
