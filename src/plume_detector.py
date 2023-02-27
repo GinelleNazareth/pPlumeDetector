@@ -46,10 +46,8 @@ class PPlumeDetector():
         # Vars for storing data from MOOS DB
         self.num_samples = None
         self.num_steps = None
-        self.start_angle_grads = 0
-        self.stop_angle_grads = 399
-        self.sonar_start_angle_grads = None
-        self.sonar_stop_angle_grads = None
+        self.start_angle_grads = None
+        self.stop_angle_grads = None
         self.transmit_enable = None
         self.speed_of_sound = None
         self.binary_device_data_msg = None # Encoded PING360_DEVICE_DATA message
@@ -242,21 +240,21 @@ class PPlumeDetector():
             elif name == 'SONAR_NUM_STEPS':
                 self.num_steps = val
             elif name == 'SONAR_START_ANGLE_GRADS':
-                self.sonar_start_angle_grads = val
+                self.start_angle_grads = val
             elif name == 'SONAR_STOP_ANGLE_GRADS':
-                self.sonar_stop_angle_grads = val
+                self.stop_angle_grads = val
             elif name == 'SONAR_TRANSMIT_ENABLE':
                 self.transmit_enable = val
             elif name == 'SONAR_SPEED_OF_SOUND':
                 self.speed_of_sound = val
 
-            required_vars = [self.num_samples, self.num_steps, self.sonar_start_angle_grads, self.sonar_stop_angle_grads, self.speed_of_sound]
+            required_vars = [self.num_samples, self.num_steps, self.start_angle_grads, self.stop_angle_grads, self.speed_of_sound]
 
             # Class can be configured once all the vars have been set
             if all(item is not None for item in required_vars):
             #if self.num_samples and self.num_steps and self.start_angle_grads and self.stop_angle_grads and self.speed_of_sound:
                 print("Config vars:samples: {0}, steps: {1}, start: {2}, stop: {3}, speed of sound: {4}".format(self.num_samples,
-                        self.num_steps, self.sonar_start_angle_grads, self.sonar_stop_angle_grads, self.speed_of_sound))
+                        self.num_steps, self.start_angle_grads, self.stop_angle_grads, self.speed_of_sound))
                 self.ready_for_config = True
 
         return
@@ -279,12 +277,16 @@ class PPlumeDetector():
             self.scan_angles = np.array(scan_angles_list, dtype=np.uint)
 
         # Initialize self.seg_scan and self.scan_valid_cols
-        self.scan_intensities = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
-        self.scan_intensities_denoised = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
-        self.seg_scan = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
-        self.scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
+        self.scan_intensities = np.zeros((self.num_samples, 400), dtype=np.uint8)
+        self.scan_intensities_denoised = np.zeros((self.num_samples, 400), dtype=np.uint8)
+        self.seg_scan = np.zeros((self.num_samples, 400), dtype=np.uint8)
+        self.scan_valid_cols = np.zeros(400, dtype=np.uint)
+        #self.scan_intensities = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
+        #self.scan_intensities_denoised = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
+        #self.seg_scan = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
+        #self.scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
 
-        self.scan_processing_angles = [self.sonar_start_angle_grads, self.sonar_stop_angle_grads]
+        self.scan_processing_angles = [self.start_angle_grads, self.stop_angle_grads]
 
         print ("PPlumeDetector configured with {0} scanning field".format(self.seg_scan.shape))
         return
@@ -308,6 +310,7 @@ class PPlumeDetector():
             self.seg_scan_snapshot = copy.deepcopy(self.seg_scan)
             self.clustering_pending = True
 
+            # TODO P1: Check that we have sufficient valid cols before processing. Also reset coorectly. 
             # Reset valid flags for new data
             self.scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
 
@@ -563,14 +566,14 @@ class PPlumeDetector():
 
         # 1: Original data, warped
         ax = fig.add_subplot(2, 3, 1)
-        plt.imshow(warped, interpolation='none', cmap='jet')
+        plt.imshow(warped, interpolation='none', cmap='jet',vmin=0,vmax=255)
         ax.title.set_text('1: Original')
         ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
         ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
 
         # 2: Denoised data
         ax = fig.add_subplot(2, 3, 2)
-        plt.imshow(denoised_warped, interpolation='none', cmap='jet')
+        plt.imshow(denoised_warped, interpolation='none', cmap='jet',vmin=0,vmax=255)
         ax.title.set_text('2: Denoised')
         ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
         ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
