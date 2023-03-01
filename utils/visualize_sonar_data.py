@@ -116,14 +116,14 @@ if __name__ == "__main__":
 
             # 1: Original data, warped
             ax = fig.add_subplot(2, 3, 1)
-            plt.imshow(warped, interpolation='none', cmap='jet')
+            plt.imshow(warped, interpolation='none', cmap='jet',vmin=0,vmax=255)
             ax.title.set_text('1: Original')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
             # 2: Denoised data
             ax = fig.add_subplot(2, 3, 2)
-            plt.imshow(denoised_warped, interpolation='none',cmap='jet')
+            plt.imshow(denoised_warped, interpolation='none',cmap='jet',vmin=0,vmax=255)
             ax.title.set_text('2: Denoised')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
