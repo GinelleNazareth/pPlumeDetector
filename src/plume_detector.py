@@ -24,8 +24,6 @@ class Cluster():
         self.center_col = 0
         self.radius_pixels = -1
 
-
-
 class PPlumeDetector():
     def __init__(self):
 
@@ -73,10 +71,6 @@ class PPlumeDetector():
         self.labelled_clustered_img = None # seg_image * labelled_regions_img
         self.output_img = None
 
-        # Array indicating whether the data in the corresponding columns of the scan_intensities and seg_scan matrices are valid
-        self.scan_valid_cols = None
-
-        self.scan_angles = None # Array containing scan angles (gradians) for each column of the seg_scan matrix
         self.num_scans = 0
         self.first_scan = True
         self.clustering_pending = False
@@ -192,35 +186,38 @@ class PPlumeDetector():
         start angle, stop angle and number of samples can only be set on startup. Once the class is configured, changes
         to these vars in the MOOS DB do not have any effect.'''
 
+        # TODO P2 - Ensure message list is in chronological order before processing
         # Save all new input data
         msg_list = self.comms.fetch()
+
         for msg in msg_list:
+
             self.save_input_var(msg)
 
-        # Evaluate state machine, call function to process any new ping data
-        if self.state_string in ['DB_DISCONNECTED', 'DB_REGISTRATION_ERROR']:
-            # Do nothing if all vars not registered with the DB
-            # Also, should not get here if state is 'DB_DISCONNECTED'
-            pass
+            # Evaluate state machine, call function to process any new ping data
+            if self.state_string in ['DB_DISCONNECTED', 'DB_REGISTRATION_ERROR']:
+                # Do nothing if all vars not registered with the DB
+                # Also, should not get here if state is 'DB_DISCONNECTED'
+                pass
 
-        elif self.state_string == 'DB_CONNECTED':
-            if self.ready_for_config:
-                self.configure()
+            elif self.state_string == 'DB_CONNECTED':
+                if self.ready_for_config:
+                    self.configure()
+                    if self.transmit_enable:
+                        self.state_string = 'ACTIVE'
+                    else:
+                        self.state_string = 'STANDBY'
+
+            elif self.state_string == 'STANDBY':
                 if self.transmit_enable:
                     self.state_string = 'ACTIVE'
-                else:
-                    self.state_string = 'STANDBY'
 
-        elif self.state_string == 'STANDBY':
-            if self.transmit_enable:
-                self.state_string = 'ACTIVE'
-
-        elif self.state_string == 'ACTIVE':
-            if self.binary_device_data_msg is not None:
-                if self.process_ping_data():
-                    self.set_status('GOOD')
-                else:
-                    self.set_status('PROCESSING_ERROR')
+            elif self.state_string == 'ACTIVE':
+                if self.binary_device_data_msg is not None:
+                    if self.process_ping_data():
+                        self.set_status('GOOD')
+                    else:
+                        self.set_status('PROCESSING_ERROR')
 
         return True
 
@@ -260,35 +257,14 @@ class PPlumeDetector():
         return
 
     def configure(self):
-        '''Initializes the self.scan_angles and self.seg_scan vars. The scan angles are computed base don the start/stop
-        angles and the number of steps. '''
+        ''' Initialize class data storage arrays '''
 
-        # Calculate scan angles
-        if self.start_angle_grads > self.stop_angle_grads: # Sector crosses 399->0 grads
-            # Add 400 to stop angle because scan angles generation is easier when stop angle > start angle
-            stop_angle_adjusted_grads = self.stop_angle_grads + 400
-            scan_angles_list = [i for i in range(self.start_angle_grads, stop_angle_adjusted_grads+1, self.num_steps)]
-            self.scan_angles = np.array(scan_angles_list, dtype=np.uint)
-            for index, angle in enumerate(self.scan_angles):
-                if angle >= 400: # Remove 400 grads offset that was added
-                    self.scan_angles[index] = angle - 400
-        else: # Sector does not cross 399 -> 0 grads
-            scan_angles_list = [i for i in range(self.start_angle_grads, self.stop_angle_grads+1, self.num_steps)]
-            self.scan_angles = np.array(scan_angles_list, dtype=np.uint)
-
-        # Initialize self.seg_scan and self.scan_valid_cols
         self.scan_intensities = np.zeros((self.num_samples, 400), dtype=np.uint8)
         self.scan_intensities_denoised = np.zeros((self.num_samples, 400), dtype=np.uint8)
         self.seg_scan = np.zeros((self.num_samples, 400), dtype=np.uint8)
-        self.scan_valid_cols = np.zeros(400, dtype=np.uint)
-        #self.scan_intensities = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
-        #self.scan_intensities_denoised = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
-        #self.seg_scan = np.zeros((self.num_samples, len(self.scan_angles)), dtype=np.uint8)
-        #self.scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
 
         self.scan_processing_angles = [self.start_angle_grads, self.stop_angle_grads]
 
-        print ("PPlumeDetector configured with {0} scanning field".format(self.seg_scan.shape))
         return
 
     def process_ping_data(self):
@@ -299,22 +275,15 @@ class PPlumeDetector():
         if not self.update_scan_intensities():
             return False
 
+        print(str(self.device_data_msg.angle))
         # Process the data when at the start/stop angles
         if self.device_data_msg.angle in self.scan_processing_angles:
-
             self.num_scans = self.num_scans + 1
             self.comms.notify('PLUME_DETECTOR_NUM_SCANS', self.num_scans, pymoos.time())
-
 
             # Copy data and set flag for clustering to be completed in the run thread
             self.seg_scan_snapshot = copy.deepcopy(self.seg_scan)
             self.clustering_pending = True
-
-            # TODO P1: Check that we have sufficient valid cols before processing. Also reset coorectly. 
-            # Reset valid flags for new data
-            self.scan_valid_cols = np.zeros(len(self.scan_angles), dtype=np.uint)
-
-            # TODO P1 - Also reset sector_intensities, but leave beginning/end (also reset valid flag to match)
 
         return True
 
@@ -347,35 +316,27 @@ class PPlumeDetector():
         return True
 
     def update_scan_intensities(self):
-        '''Extracts the intensities from the Ping360 device data message stored in self.device_data_msg, and stores the
-        segmented data into self.seg_scan'''
-        ''' First cuts out the data close to the sonar head. Then adaptively thresholds the scan intensities to segment
-                the data.'''
+        ''' Stores the intensity data, removes the noise close to the transducer and segments the data'''
 
-        scanned_angle = self.device_data_msg.angle
-        if scanned_angle not in self.scan_angles:
-            print("Device data angle({0}) not within scan angles. Data not stored.".format(scanned_angle))
-            return False
+        # TODO P2 - Store ping timestamps, and discard old data before clustering
 
         # Ensure that dataset is the correct size
         intensities = np.frombuffer(self.device_data_msg.data, dtype=np.uint8) # Convert intensity data bytearray to numpy array
         if intensities.size != self.num_samples:
-            print("Intensities array length ({0}) does not match number of samples ({1})".format(intensities.size))
+            print("Intensities array length ({0}) does not match number of samples ({1}). Data not stored".format(intensities.size))
             return False
 
-        # Save segmented data and valid flag
-        # First get column index for storage. The [0][0] required because np.where returns tuple containing an array
-        scanned_index = np.where(self.scan_angles==scanned_angle)[0][0]
-        self.scan_intensities[:,scanned_index] = intensities
-        self.scan_valid_cols[scanned_index] = 1
+        # Save the intensity data
+        scanned_angle = self.device_data_msg.angle
+        self.scan_intensities[:, scanned_angle] = intensities
 
         # Remove noise data close to the head
         noise_range_samples = int((self.noise_range_m / self.calc_range(self.num_samples)) * self.num_samples)
-        self.scan_intensities_denoised[:,scanned_index] = intensities
-        self.scan_intensities_denoised[0:noise_range_samples, scanned_index] = np.zeros((noise_range_samples), dtype=np.uint8)
+        self.scan_intensities_denoised[:,scanned_angle] = intensities
+        self.scan_intensities_denoised[0:noise_range_samples, scanned_angle] = np.zeros((noise_range_samples), dtype=np.uint8)
 
-        # Segment data
-        self.seg_scan[:,scanned_index] = (self.scan_intensities_denoised[:,scanned_index]  > self.threshold).astype(np.uint8)
+        # Apply a threshold to segment the data
+        self.seg_scan[:,scanned_angle] = (self.scan_intensities_denoised[:,scanned_angle]  > self.threshold).astype(np.uint8)
 
         #print('Angle: ' + str(scanned_angle))
 
