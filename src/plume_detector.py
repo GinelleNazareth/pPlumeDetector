@@ -393,11 +393,12 @@ class PPlumeDetector():
         area = window_rows*window_cols
         self.cluster_min_pixels = self.cluster_min_fill_percent*area/100
 
-        # Calculate border padding
+        # Add border padding to image
         row_padding = math.floor(window_rows / 2)
         col_padding = math.floor(window_cols / 2)
+        self.seg_img = cv.copyMakeBorder(self.seg_img, row_padding, row_padding, col_padding, col_padding,
+                                         cv.BORDER_CONSTANT, None, value=0)
 
-        # TODO P1 - Fix padding
         # Initialize image matrices
         rows = self.seg_img.shape[0]
         cols = self.seg_img.shape[1]
