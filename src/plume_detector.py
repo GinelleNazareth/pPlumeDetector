@@ -35,6 +35,7 @@ class PPlumeDetector():
         self.threshold_max = 0.95 * 255
         self.grads_to_rads = np.pi/200
         self.threshold = 0.5*255
+        self.max_angle_grads = 400
 
         self.window_width_pixels = None
         self.cluster_min_pixels = None
@@ -78,10 +79,18 @@ class PPlumeDetector():
         self.num_clusters = 0
         self.clusters = [] # List of Cluster data structures
 
-        # Indicates whether all the config vars have been received, and the class data structures can be configured
-        self.ready_for_config = False
-
         self.img_save_path = None
+
+        # Most recent nav data
+        self.current_nav_x = 0
+        self.current_nav_y = 0
+        self.current_nav_heading = 0
+
+        # Nav data is saved every time a ping message is received. There is storage for each position of the sonar head,
+        # allowing for the nav data at the time of each ping to be stored.
+        self.nav_x_history = np.zeros(self.max_angle_grads)
+        self.nav_y_history = np.zeros(self.max_angle_grads)
+        self.nav_heading_history = np.zeros(self.max_angle_grads)
 
         self.state_string= 'DB_DISCONNECTED'
         self.states = {
@@ -144,6 +153,9 @@ class PPlumeDetector():
         success = success and self.comms.register('SONAR_PING_DATA', 0)
         success = success and self.comms.register('SONAR_TRANSMIT_ENABLE', 0)
         success = success and self.comms.register('SONAR_SPEED_OF_SOUND', 0)
+        success = success and self.comms.register('NAV_X', 0)
+        success = success and self.comms.register('NAV_Y', 0)
+        success = success and self.comms.register('NAV_HEADING', 0)
 
         if success:
             self.set_state('DB_CONNECTED')
@@ -201,8 +213,7 @@ class PPlumeDetector():
                 pass
 
             elif self.state_string == 'DB_CONNECTED':
-                if self.ready_for_config:
-                    self.configure()
+                if self.configure():
                     if self.transmit_enable:
                         self.state_string = 'ACTIVE'
                     else:
@@ -222,52 +233,64 @@ class PPlumeDetector():
         return True
 
     def save_input_var(self, msg):
-        '''Saves message data in correct class var. Also sets 'ready_for_config' if all config vars received'''
+        '''Saves message data in correct class var.'''
 
         # Save message data
         name = msg.name()
         if name == 'SONAR_PING_DATA':
             self.binary_device_data_msg = msg.binary_data()
         else: # Numeric data type
-            val = int(msg.double())
-            print("Received {0}: {1}".format(name, val))
+            val = msg.double()
+            #print("Received {0}: {1}".format(name, val))
 
             if name == 'SONAR_NUMBER_OF_SAMPLES':
-                self.num_samples = val
+                self.num_samples = int(val)
             elif name == 'SONAR_NUM_STEPS':
-                self.num_steps = val
+                self.num_steps = int(val)
             elif name == 'SONAR_START_ANGLE_GRADS':
-                self.start_angle_grads = val
+                self.start_angle_grads = int(val)
             elif name == 'SONAR_STOP_ANGLE_GRADS':
-                self.stop_angle_grads = val
+                self.stop_angle_grads = int(val)
             elif name == 'SONAR_TRANSMIT_ENABLE':
-                self.transmit_enable = val
+                self.transmit_enable = int(val)
             elif name == 'SONAR_SPEED_OF_SOUND':
-                self.speed_of_sound = val
-
-            required_vars = [self.num_samples, self.num_steps, self.start_angle_grads, self.stop_angle_grads, self.speed_of_sound]
-
-            # Class can be configured once all the vars have been set
-            if all(item is not None for item in required_vars):
-            #if self.num_samples and self.num_steps and self.start_angle_grads and self.stop_angle_grads and self.speed_of_sound:
-                print("Config vars:samples: {0}, steps: {1}, start: {2}, stop: {3}, speed of sound: {4}".format(self.num_samples,
-                        self.num_steps, self.start_angle_grads, self.stop_angle_grads, self.speed_of_sound))
-                self.ready_for_config = True
+                self.speed_of_sound = int(val)
+            elif name == 'NAV_X':
+                self.current_nav_x = val
+            elif name == 'NAV_Y':
+                self.current_nav_y = val
+            elif name == 'NAV_HEADING':
+                self.current_nav_heading = val
 
         return
 
     def configure(self):
-        ''' Initialize class data storage arrays '''
+        ''' Initialize class data storage arrays if all config variable have been set'''
 
-        self.scan_intensities = np.zeros((self.num_samples, 400), dtype=np.uint8)
-        self.scan_intensities_denoised = np.zeros((self.num_samples, 400), dtype=np.uint8)
-        self.seg_scan = np.zeros((self.num_samples, 400), dtype=np.uint8)
+        required_vars = [self.num_samples, self.num_steps, self.start_angle_grads, self.stop_angle_grads,
+                         self.speed_of_sound]
 
-        self.scan_processing_angles = [self.start_angle_grads, self.stop_angle_grads]
+        # Class can be configured if all the config vars have been set
+        if all(item is not None for item in required_vars):
 
-        return
+            self.scan_intensities = np.zeros((self.num_samples, self.max_angle_grads), dtype=np.uint8)
+            self.scan_intensities_denoised = np.zeros((self.num_samples, self.max_angle_grads), dtype=np.uint8)
+            self.seg_scan = np.zeros((self.num_samples, self.max_angle_grads), dtype=np.uint8)
+
+            self.scan_processing_angles = [self.start_angle_grads, self.stop_angle_grads]
+
+            print("Config vars:samples: {0}, steps: {1}, start: {2}, stop: {3}, speed of sound: {4}".format(
+                self.num_samples, self.num_steps, self.start_angle_grads, self.stop_angle_grads, self.speed_of_sound))
+
+            return True
+
+        else:
+            return False
+
 
     def process_ping_data(self):
+        '''Calls functions to decode the binary ping data and save nav data. If the transducer head is at the start/stop
+        angle, it creates a copy of the sector scan data and sets a flag to indicate that the clustering can be run'''
 
         if not self.decode_device_data_msg():
             return False
@@ -275,7 +298,9 @@ class PPlumeDetector():
         if not self.update_scan_intensities():
             return False
 
-        print(str(self.device_data_msg.angle))
+        self.save_nav_data()
+
+        #print(str(self.device_data_msg.angle))
         # Process the data when at the start/stop angles
         if self.device_data_msg.angle in self.scan_processing_angles:
             self.num_scans = self.num_scans + 1
@@ -341,6 +366,17 @@ class PPlumeDetector():
         #print('Angle: ' + str(scanned_angle))
 
         return True
+
+    def save_nav_data(self):
+        '''Stores the current nav data in the nav data history arrays, at the index location defined by the scanned angle'''
+
+        scanned_angle = self.device_data_msg.angle
+
+        self.nav_x_history[scanned_angle] = self.current_nav_x
+        self.nav_y_history[scanned_angle] = self.current_nav_y
+        self.nav_heading_history[scanned_angle] = self.current_nav_heading
+
+        return
 
     def create_sonar_image(self, sector_intensities):
         '''First rearrages sector intensities matrix to match OpenCV reference - includes reference frame conversion as
