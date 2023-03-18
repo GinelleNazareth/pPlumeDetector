@@ -19,21 +19,46 @@ import os
 
 class Cluster():
     def __init__(self):
-        self.num_pixels = 0
+        # Cluster radius is the distance from the cluster center to the furthest point from it
+        self.radius_pixels = 0
+        self.radius_m = 0
+
+        # Sonar beam angle at cluster center
+        self.angle_degs = 0
+
+        # Vehicle nav data at time that the sonar pinged the cluster center
+        self.nav_x = 0
+        self.nav_y = 0
+        self.nav_heading = 0
+
+        # Cluster center in pixel coordinates
         self.center_row = 0
         self.center_col = 0
-        self.radius_pixels = -1
+
+        # Cluster center in the different reference frames
+        self.instrument_x = 0
+        self.instrument_x = 0
+        self.body_x = 0
+        self.body_y = 0
+        self.local_x = 0
+        self.local_y = 0
+        self.lat = 0
+        self.long = 0
 
 class PPlumeDetector():
     def __init__(self):
 
-        # Constants
+        # Algorithm Parameters
         self.k_const = 2 #Threshold for each ping = mean + K*std.dev
-        self.window_width_m = 0.5
+        self.window_width_m = 0.5 # Clustering window size
         self.cluster_min_fill_percent = 50
-        self.threshold_min = 0.5*255
-        self.threshold_max = 0.95 * 255
-        self.grads_to_rads = np.pi/200
+        self.image_width_pixels = 400# Width in pixels of sonar images
+        # Distance between the Ping360 and INS center, measured along the vehicle's longitudinal axis
+        self.instrument_offset_x_m = 3
+
+        # Constants
+        self.grads_to_rads = np.pi/200 #400 gradians per 360 degs
+        self.rads_to_grads = 200/np.pi
         self.threshold = 0.5*255
         self.max_angle_grads = 400
 
@@ -51,6 +76,7 @@ class PPlumeDetector():
         self.speed_of_sound = None
         self.binary_device_data_msg = None # Encoded PING360_DEVICE_DATA message
         self.device_data_msg = None # Decoded PING360_DEVICE_DATA message
+        self.range_m = None # Sonar range
 
         # Angles at which to processs the sector scan data. Gets set to the start & stop angles
         self.scan_processing_angles = None
@@ -134,7 +160,9 @@ class PPlumeDetector():
                 # Warp data into image with cartesian co-ordinates, then cluster
                 self.seg_img = self.create_sonar_image(self.seg_scan_snapshot)
                 self.cluster()
-                self.calc_cluster_centers()
+                self.calc_and_show_cluster_centers()
+                self.get_cluster_center_nav()
+                self.georeference_clusters()
                 self.clustering_pending = False
 
                 self.create_plots()
@@ -150,6 +178,7 @@ class PPlumeDetector():
         success = success and self.comms.register('SONAR_NUM_STEPS', 0)
         success = success and self.comms.register('SONAR_START_ANGLE_GRADS', 0)
         success = success and self.comms.register('SONAR_STOP_ANGLE_GRADS', 0)
+        success = success and self.comms.register('SONAR_RANGE', 0)
         success = success and self.comms.register('SONAR_PING_DATA', 0)
         success = success and self.comms.register('SONAR_TRANSMIT_ENABLE', 0)
         success = success and self.comms.register('SONAR_SPEED_OF_SOUND', 0)
@@ -251,6 +280,8 @@ class PPlumeDetector():
                 self.start_angle_grads = int(val)
             elif name == 'SONAR_STOP_ANGLE_GRADS':
                 self.stop_angle_grads = int(val)
+            elif name == 'SONAR_RANGE':
+                self.range_m = val
             elif name == 'SONAR_TRANSMIT_ENABLE':
                 self.transmit_enable = int(val)
             elif name == 'SONAR_SPEED_OF_SOUND':
@@ -356,7 +387,7 @@ class PPlumeDetector():
         self.scan_intensities[:, scanned_angle] = intensities
 
         # Remove noise data close to the head
-        noise_range_samples = int((self.noise_range_m / self.calc_range(self.num_samples)) * self.num_samples)
+        noise_range_samples = int(self.noise_range_m / self.range_m * self.num_samples)
         self.scan_intensities_denoised[:,scanned_angle] = intensities
         self.scan_intensities_denoised[0:noise_range_samples, scanned_angle] = np.zeros((noise_range_samples), dtype=np.uint8)
 
@@ -393,7 +424,7 @@ class PPlumeDetector():
         sector_intensities_mod[100:400] = sector_intensities_t[0:300]
 
         # Warp intensities matrix into circular image
-        radius = 200  # Output image will be 200x200 pixels
+        radius = int(self.image_width_pixels/2)
         warp_flags = cv.WARP_INVERSE_MAP + cv.WARP_POLAR_LINEAR + cv.WARP_FILL_OUTLIERS + cv.INTER_LINEAR
         warped_image = cv.warpPolar(sector_intensities_mod, center=(radius, radius), maxRadius=radius,
                                     dsize=(2 * radius, 2 * radius),
@@ -413,8 +444,7 @@ class PPlumeDetector():
 
         # Convert window width from meters to pixels
         image_width_pixels = self.seg_img.shape[1] # Assumes square image
-        range_m = self.calc_range(self.num_samples)
-        self.window_width_pixels = self.window_width_m * image_width_pixels / (2 * range_m)
+        self.window_width_pixels = self.window_width_m * image_width_pixels / (2 * self.range_m)
         self.window_width_pixels = 2*math.floor(self.window_width_pixels/2) + 1 # Window size should be an odd number
 
         # Ensure widow width is at least 3 pixels
@@ -471,13 +501,14 @@ class PPlumeDetector():
 
         return
 
-    def calc_cluster_centers(self):
+    def calc_and_show_cluster_centers(self):
         '''Calculates the cluster centers and radii, and draws them on the output image'''
 
         self.clusters = [Cluster() for i in range(self.num_clusters+1)]
         self.output_img = copy.deepcopy(self.labelled_clustered_img)
 
         # Calculate cluster centers and radii
+        # Note that cluster numbering starts at 1
         for cluster_num in np.arange(1,self.num_clusters+1,1):
 
             # Get indices of cluster pixels
@@ -527,23 +558,74 @@ class PPlumeDetector():
 
         return
 
-    def calc_range(self, sample_num):
-        '''Calculates the one-way range (meters) for the specified sample number'''
+    def get_cluster_center_nav(self):
+        '''Gets the vehicle nav data at time that the sonar pinged the cluster center'''
 
-        if self.device_data_msg is None:
-            raise Exception("Cannot calculate range without sample period from device data message")
+        num_rows = num_cols = self.labelled_clustered_img.shape[0]  # Assumes square image
 
-        # Sample period in device data message is measured in 25 nano-second increments
-        sample_period_sec = self.device_data_msg.sample_period * 25e-9
+        for i in np.arange(1,self.num_clusters+1,1):
+            # Cluster center coordinates relative to the top left corner of the image
+            row = self.clusters[i].center_row
+            col = self.clusters[i].center_col
 
-        range = (sample_period_sec * sample_num * self.speed_of_sound) / 2
+            # Cluster center coordinates relative to the center of the image
+            x = row - (num_rows - 1)/2
+            y = -1 * (col - (num_cols - 1)/2)
 
-        return range
+            theta_rads = math.atan2(y,x)
+            theta_degs = theta_rads * 180/math.pi
+            theta_grads = round(theta_rads * self.rads_to_grads)
+
+            self.clusters[i].nav_x = self.nav_x_history[theta_grads]
+            self.clusters[i].nav_y = self.nav_y_history[theta_grads]
+            self.clusters[i].nav_heading = self.nav_heading_history[theta_grads]
+
+        return
+
+    def georeference_clusters(self):
+        num_rows = num_cols = self.labelled_clustered_img.shape[0] # Assumes square image
+        meters_per_pixel = (2 * self.range_m) / self.image_width_pixels
+
+        for i in np.arange(1,self.num_clusters+1,1):
+
+            # Retrieve cluster center and radius in image coordinates
+            center_row = self.clusters[i].center_row
+            center_col = self.clusters[i].center_col
+            radius_pixels = self.clusters[i].radius_pixels
+
+            # Calculate cluster radius in meteres
+            self.clusters[i].radius_m = radius_pixels * meters_per_pixel
+
+            # Calculate cluster center in instrument coordinates
+            instrument_x = (num_rows - 1)/2 - center_row
+            instrument_x = instrument_x * meters_per_pixel
+            instrument_y = (num_cols - 1)/2 - center_col
+            instrument_y = instrument_y * meters_per_pixel
+
+            # Calculate cluster center in body coordinates
+            body_x = instrument_x + self.instrument_offset_x_m
+            body_y = instrument_y
+
+            # Calculate cluster center in local coordinates
+            theta = (self.clusters[i].nav_heading - 90) * np.pi/180
+            local_x = self.clusters[i].nav_x + (body_x * math.cos(theta) + body_y * math.sin(theta))
+            local_y = self.clusters[i].nav_y + (body_x * -math.sin(theta) + body_y * math.cos(theta))
+
+            # Save calculations
+            self.clusters[i].instrument_x = instrument_x
+            self.clusters[i].instrument_y = instrument_y
+            self.clusters[i].body_x = body_x
+            self.clusters[i].body_y = body_y
+            self.clusters[i].local_x = local_x
+            self.clusters[i].local_y = local_y
+
+            print(str(local_x) + ", " + str(local_y))
+
+        return
 
     def create_plots(self):
 
-        range_m = self.calc_range(self.num_samples)
-        range_m_int = round(range_m)
+        range_m_int = round(self.range_m)
 
         # Create warped (polar) images
         warped = self.create_sonar_image(self.scan_intensities)

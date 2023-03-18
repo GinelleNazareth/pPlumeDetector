@@ -88,7 +88,9 @@ if __name__ == "__main__":
             # Call functions to create an image of the scan and cluster it
             plume_detector.seg_img = plume_detector.create_sonar_image(plume_detector.seg_scan_snapshot)
             plume_detector.cluster()
-            plume_detector.calc_cluster_centers()
+            plume_detector.calc_and_show_cluster_centers()
+            plume_detector.get_cluster_center_nav()
+            plume_detector.georeference_clusters()
 
             scan_num += 1
             print('Scan:', scan_num)
