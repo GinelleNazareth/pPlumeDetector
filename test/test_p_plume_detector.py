@@ -13,6 +13,8 @@ class TestPPlumeDetector(TestCase):
         self.detector.range_m = 50
         self.detector.num_clusters = 4
         self.detector.image_width_pixels = 400
+        self.detector.lat_origin = 0.00
+        self.detector.long_origin = 0.00
         self.detector.labelled_clustered_img = np.zeros((404, 404), dtype=np.uint8)
 
         self.detector.clusters = [Cluster() for i in range(self.detector.num_clusters + 1)]
@@ -34,21 +36,21 @@ class TestGeoreferencing(TestPPlumeDetector):
 
         self.detector.clusters[2].center_row = 101.5
         self.detector.clusters[2].center_col = 101.5
-        self.detector.clusters[2].radius_pixels = 10
+        self.detector.clusters[2].radius_pixels = 20
         self.detector.clusters[2].nav_x = 0
         self.detector.clusters[2].nav_x = 0
         self.detector.clusters[2].nav_heading = 0
 
         self.detector.clusters[3].center_row = 301.5
         self.detector.clusters[3].center_col = 101.5
-        self.detector.clusters[3].radius_pixels = 10
+        self.detector.clusters[3].radius_pixels = 30
         self.detector.clusters[3].nav_x = 0
         self.detector.clusters[3].nav_x = 0
         self.detector.clusters[3].nav_heading = 0
 
         self.detector.clusters[4].center_row = 301.5
         self.detector.clusters[4].center_col = 301.5
-        self.detector.clusters[4].radius_pixels = 10
+        self.detector.clusters[4].radius_pixels = 40
         self.detector.clusters[4].nav_x = 0
         self.detector.clusters[4].nav_x = 0
         self.detector.clusters[4].nav_heading = 0
@@ -66,6 +68,12 @@ class TestGeoreferencing(TestPPlumeDetector):
 
         self.assertAlmostEqual(self.detector.clusters[4].local_x, 25.0, places=2)
         self.assertAlmostEqual(self.detector.clusters[4].local_y, -25.0, places=2)
+
+        self.assertEqual(self.detector.clusters[1].radius_m, 2.5)
+        self.assertEqual(self.detector.clusters[2].radius_m, 5.0)
+        self.assertEqual(self.detector.clusters[3].radius_m, 7.5)
+        self.assertEqual(self.detector.clusters[4].radius_m, 10.0)
+
 
     # Test 2 - Cluster detections in each of the four quadrants. Added instrument offset. No nav offset or heading rotations
     def test2(self):
@@ -347,4 +355,43 @@ class TestGeoreferencing(TestPPlumeDetector):
 
         self.assertAlmostEqual(self.detector.clusters[4].local_x, 50.0, places=2)
         self.assertAlmostEqual(self.detector.clusters[4].local_y, 25.0, places=2)
+
+    # Test 8 - Tests output_cluster_centers function
+    def test8(self):
+        self.detector.instrument_offset_x_m = 0
+
+        self.detector.clusters[1].center_row = 101.5
+        self.detector.clusters[1].center_col = 301.5
+        self.detector.clusters[1].radius_pixels = 10
+        self.detector.clusters[1].nav_x = 0
+        self.detector.clusters[1].nav_x = 0
+        self.detector.clusters[1].nav_heading = 0
+
+        self.detector.clusters[2].center_row = 101.5
+        self.detector.clusters[2].center_col = 101.5
+        self.detector.clusters[2].radius_pixels = 20
+        self.detector.clusters[2].nav_x = 0
+        self.detector.clusters[2].nav_x = 0
+        self.detector.clusters[2].nav_heading = 0
+
+        self.detector.clusters[3].center_row = 301.5
+        self.detector.clusters[3].center_col = 101.5
+        self.detector.clusters[3].radius_pixels = 30
+        self.detector.clusters[3].nav_x = 0
+        self.detector.clusters[3].nav_x = 0
+        self.detector.clusters[3].nav_heading = 0
+
+        self.detector.clusters[4].center_row = 301.5
+        self.detector.clusters[4].center_col = 301.5
+        self.detector.clusters[4].radius_pixels = 10
+        self.detector.clusters[4].nav_x = 0
+        self.detector.clusters[4].nav_x = 0
+        self.detector.clusters[4].nav_heading = 0
+
+        self.detector.georeference_clusters()
+        self.detector.output_cluster_centers()
+
+        self.assertEqual(self.detector.output_cluster_num, 3)
+        self.assertEqual(self.detector.cluster_centers_string, "25.00,25.00,2.50:-25.00,25.00,5.00:-25.00,-25.00,7.50:25.00,-25.00,2.50")
+
 
