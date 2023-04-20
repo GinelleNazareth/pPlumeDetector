@@ -168,6 +168,7 @@ class PPlumeDetector():
                 self.calc_and_show_cluster_centers()
                 self.get_cluster_center_nav()
                 self.georeference_clusters()
+                self.output_cluster_centers()
                 self.clustering_pending = False
 
                 self.create_plots()
@@ -234,7 +235,6 @@ class PPlumeDetector():
         start angle, stop angle and number of samples can only be set on startup. Once the class is configured, changes
         to these vars in the MOOS DB do not have any effect.'''
 
-        # TODO P2 - Ensure message list is in chronological order before processing
         # Save all new input data
         msg_list = self.comms.fetch()
 
@@ -251,13 +251,13 @@ class PPlumeDetector():
             elif self.state_string == 'DB_CONNECTED':
                 if self.configure():
                     if self.transmit_enable:
-                        self.state_string = 'ACTIVE'
+                        self.set_state('ACTIVE')
                     else:
-                        self.state_string = 'STANDBY'
+                        self.set_state('STANDBY')
 
             elif self.state_string == 'STANDBY':
                 if self.transmit_enable:
-                    self.state_string = 'ACTIVE'
+                    self.set_state('ACTIVE')
 
             elif self.state_string == 'ACTIVE':
                 if self.binary_device_data_msg is not None:
@@ -310,7 +310,7 @@ class PPlumeDetector():
         ''' Initialize class data storage arrays if all config variable have been set'''
 
         required_vars = [self.num_samples, self.num_steps, self.start_angle_grads, self.stop_angle_grads,
-                         self.speed_of_sound]
+                         self.speed_of_sound, self.lat_origin, self.long_origin]
 
         # Class can be configured if all the config vars have been set
         if all(item is not None for item in required_vars):
@@ -321,8 +321,9 @@ class PPlumeDetector():
 
             self.scan_processing_angles = [self.start_angle_grads, self.stop_angle_grads]
 
-            print("Config vars:samples: {0}, steps: {1}, start: {2}, stop: {3}, speed of sound: {4}".format(
-                self.num_samples, self.num_steps, self.start_angle_grads, self.stop_angle_grads, self.speed_of_sound))
+            print("Config vars:samples: {0}, steps: {1}, start: {2}, stop: {3}, speed of sound: {4}, lat origin: {5}, "
+                  "long origin: {6}".format(self.num_samples, self.num_steps, self.start_angle_grads,
+                  self.stop_angle_grads, self.speed_of_sound, self.lat_origin, self.long_origin))
 
             return True
 
@@ -643,9 +644,9 @@ class PPlumeDetector():
             self.clusters[i].lat = lat
             self.clusters[i].long = long
 
-            print("local: " + str(local_x) + "," + str(local_y))
+            print("nav: " + "{:.2f}".format(self.clusters[i].nav_x ) + "," + "{:.2f}".format(self.clusters[i].nav_y))
+            print("local: " + "{:.2f}".format(local_x) + "," + "{:.2f}".format(local_y))
             print("earth: " + "{:.6f}".format(lat) + "," + "{:.6f}".format(long))
-
 
         return
 
