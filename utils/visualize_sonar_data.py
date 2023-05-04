@@ -12,18 +12,26 @@ from matplotlib import rcParams
 
 rcParams['font.family'] = 'serif'
 
-# 20210305-031345328.bin
+# 20210305-031345328.bin - Bubble plume data collected by JH
 # ping360_20210901_123108.bin
+# ping360_20230131_175845.bin - AUV data (saw bottom?)
 
 # Script settings
-start_time = "00:00:30.000"
+#start_time = "00:00:00.000"
+#start_time = "18:12:30.000"
+start_time = "18:30:00.000"
+#start_time = "18:16:00.000"
+
+#start_time = "00:00:30.000"
 #start_time = "00:10:00.000"
-start_angle_grads = 0
-stop_angle_grads = 399
+start_angle_grads = 33
+stop_angle_grads = 167
 num_samples = 1200
+range_m = 50
 num_steps = 1
 speed_of_sound = 1500
-
+lat_origin = 47.389271
+long_origin = -53.134431
 
 if __name__ == "__main__":
 
@@ -49,10 +57,14 @@ if __name__ == "__main__":
     plume_detector.start_angle_grads = start_angle_grads
     plume_detector.stop_angle_grads = stop_angle_grads
     plume_detector.num_samples = num_samples
+    plume_detector.range_m = range_m
     plume_detector.num_steps = num_steps
     plume_detector.speed_of_sound = speed_of_sound
     plume_detector.configure()
-    plume_detector.scan_processing_angles = [199] # Over-write default, which is the start and stop angles
+    #plume_detector.scan_processing_angles = [399] # Over-write default, which is the start and stop angles
+    plume_detector.lat_origin = lat_origin
+    plume_detector.long_origin = long_origin
+    plume_detector.configure()
 
     # Open log and begin processing
     log = PingViewerLogReader(args.file)
@@ -83,7 +95,8 @@ if __name__ == "__main__":
         plume_detector.process_ping_data()
 
         # Display data at the end of each sector scan
-        if angle == 199:
+        #if angle == 399:
+        if angle == start_angle_grads or angle == stop_angle_grads:
 
             # Call functions to create an image of the scan and cluster it
             plume_detector.seg_img = plume_detector.create_sonar_image(plume_detector.seg_scan_snapshot)
@@ -95,7 +108,7 @@ if __name__ == "__main__":
             scan_num += 1
             print('Scan:', scan_num)
             print('Last timestamp',timestamp)
-            range_m = plume_detector.calc_range(num_samples)
+            #range_m = plume_detector.calc_range(num_samples)
             range_m_int = round(range_m)
             print('Range: ', range)
 
@@ -105,7 +118,7 @@ if __name__ == "__main__":
 
             # Setup plot
             fig = plt.figure()
-            suptitle = 'Scan ' + str(scan_num) + ' (Start time: ' + start_timestamp + ', End time: ' + timestamp + ')'
+            #suptitle = 'Scan ' + str(scan_num) + ' (Start time: ' + start_timestamp + ', End time: ' + timestamp + ')'
             #plt.suptitle(suptitle)
             plt.axis('off')
 
@@ -117,80 +130,105 @@ if __name__ == "__main__":
             y_labels    = [str(range_m_int), str(0.5*range_m_int), '0', str(0.5*range_m_int), str(range_m_int)]
 
             # 1: Original data, warped
-            ax = fig.add_subplot(2, 3, 1)
+            ax = fig.add_subplot(2, 2, 1)
             plt.imshow(warped, interpolation='none', cmap='jet',vmin=0,vmax=255)
             ax.title.set_text('1: Original')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
             # 2: Denoised data
-            ax = fig.add_subplot(2, 3, 2)
-            plt.imshow(denoised_warped, interpolation='none',cmap='jet',vmin=0,vmax=255)
-            ax.title.set_text('2: Denoised')
-            ax.set_xticks(x_label_pos, labels = x_labels)
-            ax.set_yticks(y_label_pos, labels= y_labels)
+            #ax = fig.add_subplot(2, 3, 2)
+            #plt.imshow(denoised_warped, interpolation='none',cmap='jet',vmin=0,vmax=255)
+            #ax.title.set_text('2: Denoised')
+            #ax.set_xticks(x_label_pos, labels = x_labels)
+            #ax.set_yticks(y_label_pos, labels= y_labels)
 
-            # 3: Segmented data
-            ax = fig.add_subplot(2, 3, 3)
+            # 2: Segmented data
+            ax = fig.add_subplot(2, 2, 2)
             image = plume_detector.seg_img.astype(float)
             image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
             plt.imshow(image, interpolation='none',cmap='RdYlBu')
-            ax.title.set_text('3: Segmented')
+            ax.title.set_text('2: Segmented')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
             # 4: Clustered Cores
-            ax = fig.add_subplot(2, 3, 4)
-            image = plume_detector.clustered_cores_img.astype(float)
-            image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
-            plt.imshow(image, interpolation='none',cmap='RdYlBu')
-            ax.title.set_text('4: Clustered Cores')
-            ax.set_xticks(x_label_pos, labels = x_labels)
-            ax.set_yticks(y_label_pos, labels= y_labels)
+            #ax = fig.add_subplot(2, 3, 4)
+            #image = plume_detector.clustered_cores_img.astype(float)
+            #image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
+            #plt.imshow(image, interpolation='none',cmap='RdYlBu')
+            #ax.title.set_text('4: Clustered Cores')
+            #ax.set_xticks(x_label_pos, labels = x_labels)
+            #ax.set_yticks(y_label_pos, labels= y_labels)
 
-            # 5: Labelled Regions
-            ax = fig.add_subplot(2, 3, 5)
+            # 3: Labelled Regions
+            ax = fig.add_subplot(2, 2, 3)
             image = plume_detector.labelled_regions_img.astype(float)
             image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
             plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
-            ax.title.set_text('5: Labelled Regions')
+            ax.title.set_text('3: Labelled Regions')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
             ax.set_aspect('equal')
 
             # Label positions for output images - different because images are larger
             rows, cols = plume_detector.output_img.shape[0], plume_detector.output_img.shape[1]
-            x_label_pos = [0, 0.25*cols, 0.5*cols, 0.75*cols, cols]
-            y_label_pos = [0, 0.25*rows, 0.5*rows, 0.75*rows, rows]
+            output_x_label_pos = [0, 0.25*cols, 0.5*cols, 0.75*cols, cols]
+            output_y_label_pos = [0, 0.25*rows, 0.5*rows, 0.75*rows, rows]
 
-            # 6: Final Output
-            ax = fig.add_subplot(2, 3, 6)
+            # 4: Final Output
+            ax = fig.add_subplot(2, 2, 4)
             image = plume_detector.output_img.astype(float)
             image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
             plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
-            ax.title.set_text('6: Labelled Clusters')
-            ax.set_xticks(x_label_pos, labels = x_labels)
-            ax.set_yticks(y_label_pos, labels= y_labels)
+            ax.title.set_text('4: Labelled Clusters')
+            ax.set_xticks(output_x_label_pos, labels = x_labels)
+            ax.set_yticks(output_y_label_pos, labels= y_labels)
             ax.set_aspect('equal')
 
             fig.tight_layout()
             #plt.show()
             #plt.savefig(os.path.join(img_save_path, suptitle))
+            image_name = "Clustering_Steps_Scan_" + str(scan_num)
+            plt.savefig(os.path.join(img_save_path, image_name), dpi=400)
+            plt.close(fig)
 
-            # # Setup plot
-            ax = plt.figure().add_subplot(1,1,1)
-            suptitle = 'Scan ' + str(scan_num) + ' (Start time: ' + start_timestamp + ', End time: ' + timestamp + ')'
-            plt.suptitle(suptitle)
+
+            # Setup plot
+            fig = plt.figure()
+            plt.suptitle('Scan ' + str(scan_num))
+            title = 'Start time: ' + start_timestamp + ', End time: ' + timestamp + ', '
+            title = title + str(plume_detector.num_clusters) + ' Clusters'
+            plt.title(title)
+            plt.axis('off')
+
+            #fig = plt.figure()
+            #suptitle = 'Scan ' + str(scan_num) + ' (Start time: ' + start_timestamp + ', End time: ' + timestamp + ')'
+            #plt.suptitle(suptitle)
             #plt.axis('off')
 
-            # 6: Final Output
-            image = plume_detector.output_img.astype(float)
-            image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
-            plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
-            ax.set_xticks(x_label_pos, labels = x_labels)
-            ax.set_yticks(y_label_pos, labels= y_labels)
-            ax.set_aspect('equal')
+            # 1: Original data, warped
+            ax = fig.add_subplot(1, 2, 1)
+            plt.imshow(warped, interpolation='none', cmap='jet', vmin=0, vmax=255)
+            ax.title.set_text('Original')
+            ax.set_xticks(x_label_pos, labels=x_labels)
+            ax.set_yticks(y_label_pos, labels=y_labels)
 
-            plt.show()
+            # 2: Plot clusters if num clusters > 0
+            if plume_detector.num_clusters > 0:
+                ax = fig.add_subplot(1, 2, 2)
+                image = plume_detector.output_img.astype(float)
+                image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
+                plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
+                ax.title.set_text('Labelled Clusters')
+                ax.set_xticks(output_x_label_pos, labels=x_labels)
+                ax.set_yticks(output_y_label_pos, labels=y_labels)
+                ax.set_aspect('equal')
+
+            #plt.show()
+            image_name = "Clustering_Overview_Scan_" + str(scan_num)
+            plt.savefig(os.path.join(img_save_path, image_name), dpi=400)
+            plt.close(fig)
+
 
             start_timestamp = ""
