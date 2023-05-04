@@ -50,9 +50,9 @@ class PPlumeDetector():
     def __init__(self):
 
         # Algorithm Parameters
-        self.k_const = 2 #Threshold for each ping = mean + K*std.dev
-        self.window_width_m = 0.5 # Clustering window size
-        self.cluster_min_fill_percent = 50
+        self.threshold = 0.3 * 255 #0.3 * 255
+        self.window_width_m = 1.0 #0.5 # Clustering window size
+        self.cluster_min_fill_percent = 30 #40
         self.image_width_pixels = 400# Width in pixels of sonar images
         # Distance between the Ping360 and INS center, measured along the vehicle's longitudinal axis
         self.instrument_offset_x_m = 3
@@ -60,7 +60,6 @@ class PPlumeDetector():
         # Constants
         self.grads_to_rads = np.pi/200 #400 gradians per 360 degs
         self.rads_to_grads = 200/np.pi
-        self.threshold = 0.5*255
         self.max_angle_grads = 400
 
         self.window_width_pixels = None
@@ -309,7 +308,7 @@ class PPlumeDetector():
     def configure(self):
         ''' Initialize class data storage arrays if all config variable have been set'''
 
-        required_vars = [self.num_samples, self.num_steps, self.start_angle_grads, self.stop_angle_grads,
+        required_vars = [self.num_samples, self.range_m, self.num_steps, self.start_angle_grads, self.stop_angle_grads,
                          self.speed_of_sound, self.lat_origin, self.long_origin]
 
         # Class can be configured if all the config vars have been set
@@ -321,9 +320,9 @@ class PPlumeDetector():
 
             self.scan_processing_angles = [self.start_angle_grads, self.stop_angle_grads]
 
-            print("Config vars:samples: {0}, steps: {1}, start: {2}, stop: {3}, speed of sound: {4}, lat origin: {5}, "
-                  "long origin: {6}".format(self.num_samples, self.num_steps, self.start_angle_grads,
-                  self.stop_angle_grads, self.speed_of_sound, self.lat_origin, self.long_origin))
+            print("Config vars:samples: {0}, range: {1}, steps: {2}, start: {3}, stop: {4}, speed of sound: {5}, "
+                  "lat origin: {6}, long origin: {7}".format(self.num_samples, self.range_m, self.num_steps,
+                  self.start_angle_grads, self.stop_angle_grads, self.speed_of_sound, self.lat_origin, self.long_origin))
 
             return True
 
@@ -712,10 +711,10 @@ class PPlumeDetector():
 
         # Create warped (polar) images
         warped = self.create_sonar_image(self.scan_intensities)
-        denoised_warped = self.create_sonar_image(self.scan_intensities_denoised)
+        #denoised_warped = self.create_sonar_image(self.scan_intensities_denoised)
 
-        # Setup plot
-        fig = plt.figure()
+        ### Plot Clustering Steps ###
+        fig = plt.figure("Clustering Steps")
         suptitle = 'Scan ' + str(self.num_scans)
         plt.suptitle(suptitle)
         plt.title(self.cluster_centers_string)
@@ -729,21 +728,21 @@ class PPlumeDetector():
         y_labels = [str(range_m_int), str(0.5 * range_m_int), '0', str(0.5 * range_m_int), str(range_m_int)]
 
         # 1: Original data, warped
-        ax = fig.add_subplot(2, 3, 1)
+        ax = fig.add_subplot(2, 2, 1)
         plt.imshow(warped, interpolation='none', cmap='jet',vmin=0,vmax=255)
         ax.title.set_text('1: Original')
         ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
         ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
 
         # 2: Denoised data
-        ax = fig.add_subplot(2, 3, 2)
-        plt.imshow(denoised_warped, interpolation='none', cmap='jet',vmin=0,vmax=255)
-        ax.title.set_text('2: Denoised')
-        ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
-        ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
+        #ax = fig.add_subplot(2, 3, 2)
+        #plt.imshow(denoised_warped, interpolation='none', cmap='jet',vmin=0,vmax=255)
+        #ax.title.set_text('2: Denoised')
+        #ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
+        #ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
 
-        # 3: Segmented data
-        ax = fig.add_subplot(2, 3, 3)
+        # 2: Segmented data
+        ax = fig.add_subplot(2, 2, 2)
         image = self.seg_img.astype(float)
         image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
         plt.imshow(image, interpolation='none', cmap='RdYlBu')
@@ -752,16 +751,16 @@ class PPlumeDetector():
         ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
 
         # 4: Clustered Cores
-        ax = fig.add_subplot(2, 3, 4)
-        image = self.clustered_cores_img.astype(float)
-        image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
-        plt.imshow(image, interpolation='none', cmap='RdYlBu')
-        ax.title.set_text('4: Clustered Cores')
-        ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
-        ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
+        #ax = fig.add_subplot(2, 3, 4)
+        #image = self.clustered_cores_img.astype(float)
+        #image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
+        #plt.imshow(image, interpolation='none', cmap='RdYlBu')
+        #ax.title.set_text('4: Clustered Cores')
+        #ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
+        #ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
 
-        # 5: Labelled Regions
-        ax = fig.add_subplot(2, 3, 5)
+        # 3: Labelled Regions
+        ax = fig.add_subplot(2, 2, 3)
         image = self.labelled_regions_img.astype(float)
         image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
         plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
@@ -770,20 +769,58 @@ class PPlumeDetector():
         ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
         ax.set_aspect('equal')
 
+        # Label positions for output images - different because images are larger
+        rows, cols = plume_detector.output_img.shape[0], plume_detector.output_img.shape[1]
+        output_x_label_pos = [0, 0.25 * cols, 0.5 * cols, 0.75 * cols, cols]
+        output_y_label_pos = [0, 0.25 * rows, 0.5 * rows, 0.75 * rows, rows]
+
         # 6: Final Output
-        ax = fig.add_subplot(2, 3, 6)
-        image = self.labelled_clustered_img.astype(float)
+        ax = fig.add_subplot(2, 2, 4)
+        image = self.output_img.astype(float)
         image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
         plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
         ax.title.set_text('6: Labelled Clusters')
-        ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
-        ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
+        ax.set_xticks(output_x_label_pos), ax.set_xticklabels(x_labels)
+        ax.set_yticks(output_y_label_pos), ax.set_yticklabels(y_labels)
         ax.set_aspect('equal')
 
         fig.tight_layout()
         #plt.show()
-        plt.savefig(os.path.join(self.img_save_path, suptitle))
-        plt.close()
+        image_name = "Clustering_Steps_Scan_" + str(self.num_scans)
+        plt.savefig(os.path.join(self.img_save_path, image_name), dpi=400)
+        plt.clf()
+
+        # ### Plot Clustering Overview ###
+        # fig = plt.figure()
+        # plt.suptitle('Scan ' + str(self.num_scans))
+        # plt.title(str(self.num_clusters) + ' Cluster(s)')
+        # plt.axis('off')
+        #
+        # # 1: Original data, warped
+        # ax = fig.add_subplot(1, 2, 1)
+        # plt.imshow(warped, interpolation='none', cmap='jet',vmin=0,vmax=255)
+        # ax.title.set_text('Original')
+        # ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
+        # ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
+        #
+        # # 2: Plot clusters if num clusters > 0
+        # if self.num_clusters > 0:
+        #     ax = fig.add_subplot(1, 2, 2)
+        #     image = self.output_img.astype(float)
+        #     image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
+        #     plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
+        #     ax.title.set_text('Labelled Clusters')
+        #     ax.set_xticks(output_x_label_pos), ax.set_xticklabels(x_labels)
+        #     ax.set_yticks(output_y_label_pos), ax.set_yticklabels(y_labels)
+        #     ax.set_aspect('equal')
+        #
+        # fig.tight_layout()
+        #
+        # # plt.show()
+        # image_name = "Clustering_Overview_Scan_" + str(self.num_scans)
+        # plt.savefig(os.path.join(self.img_save_path, image_name), dpi=400)
+        # plt.close(fig)
+
 
 
 
