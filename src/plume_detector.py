@@ -50,9 +50,9 @@ class PPlumeDetector():
     def __init__(self):
 
         # Algorithm Parameters
-        self.threshold = 0.3 * 255 #0.3 * 255
-        self.window_width_m = 1.0 #0.5 # Clustering window size
-        self.cluster_min_fill_percent = 30 #40
+        self.threshold = 0.5 * 255 #0.3 * 255
+        self.window_width_m = 0.5 #1.0 # Clustering window size
+        self.cluster_min_fill_percent = 50 #30
         self.image_width_pixels = 400# Width in pixels of sonar images
         # Distance between the Ping360 and INS center, measured along the vehicle's longitudinal axis
         self.instrument_offset_x_m = 3
@@ -121,6 +121,9 @@ class PPlumeDetector():
         self.nav_x_history = np.zeros(self.max_angle_grads)
         self.nav_y_history = np.zeros(self.max_angle_grads)
         self.nav_heading_history = np.zeros(self.max_angle_grads)
+
+        #plt.rcParams['figure.constrained_layout.use'] = True
+        plt.rcParams['font.family'] = 'serif'
 
         self.state_string= 'DB_DISCONNECTED'
         self.states = {
@@ -531,10 +534,11 @@ class PPlumeDetector():
 
             # Find furthest point & calculate cluster radius
             radius = 0
-            center = (center_row, center_col)
+            center = np.array([center_row, center_col])
             for i in range(len(indices[0])):
-                point = (indices[0][i], indices[1][i])
-                dist = math.dist(center, point)
+                point = np.array([indices[0][i], indices[1][i]])
+                dist = np.linalg.norm(point - center)
+                #dist = math.dist(center, point)
                 if dist > radius:
                     radius = dist
 
@@ -715,9 +719,10 @@ class PPlumeDetector():
 
         ### Plot Clustering Steps ###
         fig = plt.figure("Clustering Steps")
-        suptitle = 'Scan ' + str(self.num_scans)
+        #plt.subplots(2,2,layout="constrained")
+        suptitle = 'Scan ' + str(self.num_scans) + ', ' + str(self.num_clusters) + ' Cluster(s)'
         plt.suptitle(suptitle)
-        plt.title(self.cluster_centers_string)
+        #plt.title(self.cluster_centers_string)
         plt.axis('off')
 
         # Labels and label positions for warped images
@@ -784,11 +789,12 @@ class PPlumeDetector():
         ax.set_yticks(output_y_label_pos), ax.set_yticklabels(y_labels)
         ax.set_aspect('equal')
 
-        fig.tight_layout()
-        #plt.show()
+        #fig.tight_layout()
+        plt.subplot_tool()
+        plt.show()
         image_name = "Clustering_Steps_Scan_" + str(self.num_scans)
         plt.savefig(os.path.join(self.img_save_path, image_name), dpi=400)
-        plt.clf()
+        #plt.clf()
 
         # ### Plot Clustering Overview ###
         # fig = plt.figure()
