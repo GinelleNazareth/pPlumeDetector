@@ -46,13 +46,28 @@ class Cluster():
         self.lat = 0
         self.long = 0
 
+    def serialize(self):
+        return {
+            "center_row_pixels": self.center_row,
+            "center_col_pixels": self.center_col,
+            "radius_pixels": self.radius_pixels,
+            "center_local_x_m": self.local_x,
+            "center_local_y_m": self.local_y,
+            "radius_m": self.radius_m,
+            "center_lat": self.lat,
+            "center_long": self.long,
+            "nav_x_m": self.nav_x,
+            "nav_y_m": self.nav_y,
+            "nav_heading_deg": self.nav_heading
+        }
+
 class PPlumeDetector():
     def __init__(self):
 
         # Algorithm Parameters
-        self.threshold = 0.5 * 255 #0.3 * 255
-        self.window_width_m = 0.5 #1.0 # Clustering window size
-        self.cluster_min_fill_percent = 50 #30
+        self.threshold = 0.3 * 255 #0.5 * 255
+        self.window_width_m = 1.0 #0.5 # Clustering window size
+        self.cluster_min_fill_percent = 30 #50
         self.image_width_pixels = 400# Width in pixels of sonar images
         # Distance between the Ping360 and INS center, measured along the vehicle's longitudinal axis
         self.instrument_offset_x_m = 3
@@ -98,6 +113,7 @@ class PPlumeDetector():
         self.cluster_regions_img = None # Image wth all pixels in clustering windows set to 1  (used for labelling)
         self.labelled_regions_img = None # Cluster regions image, with unique label (pixel value) applied to each region
         self.labelled_clustered_img = None # seg_image * labelled_regions_img
+        self.clustered_img = None # Black and white version of labelled_clustered_img
         self.output_img = None
         self.clustered_img_view = None
 
@@ -107,10 +123,15 @@ class PPlumeDetector():
 
         self.num_clusters = 0
         self.clusters = [] # List of Cluster data structures
-        self.output_cluster_num = 0  # Index of the cluster with the largest radiuslargest_cluster_num
+        self.output_cluster_num = 0  # Index of the cluster with the largest radius
         self.cluster_centers_string = ""
 
-        self.img_save_path = None
+        self.clustering_time_secs = None
+        self.total_processing_time_secs = None
+
+        self.data_save_path = None
+        self.orig_images_path = None
+        self.viewable_images_path = None
 
         # Most recent nav data
         self.current_nav_x = 0
@@ -151,14 +172,17 @@ class PPlumeDetector():
 
         # Create directory for saving images
         date_time = datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')
-        folder_name = "sonar_data_plots_" + date_time
-        parent_dir = "./"
-        self.img_save_path = os.path.join(parent_dir, folder_name)
+        folder_name = "plume_detector_data_" + date_time
+        parent_dir  = os.path.dirname(__file__)
+        self.data_save_path = os.path.join(parent_dir, folder_name)
+        self.orig_images_path = os.path.join(self.data_save_path, "orig_images")
+        self.viewable_images_path = os.path.join(self.data_save_path, "viewable_images")
 
         try:
-            os.mkdir(self.img_save_path)
-            os.mkdir(os.path.join(self.img_save_path,'raw'))
-            os.mkdir(os.path.join(self.img_save_path,'viewable'))
+            os.mkdir(self.data_save_path)
+            os.mkdir(self.orig_images_path)
+            os.mkdir(self.viewable_images_path)
+
         except OSError as error:
             print(error)
 
@@ -166,7 +190,8 @@ class PPlumeDetector():
 
             # Process scan when ping data from start/end of scan is received
             if self.clustering_pending:
-                # TODO P2: Print total processing time
+
+                start_time = time.time()
                 # Warp data into image with cartesian co-ordinates, then cluster
                 self.seg_img = self.create_sonar_image(self.seg_scan_snapshot)
                 self.cluster()
@@ -174,10 +199,20 @@ class PPlumeDetector():
                 self.get_cluster_center_nav()
                 self.georeference_clusters()
                 self.output_cluster_centers()
-                self.clustering_pending = False
-
-                self.save_plots()
+                self.save_images()
                 #self.create_plots()
+
+                # Calculate and output the total processing time
+                end_time = time.time()
+                self.total_processing_time_secs = end_time - start_time
+                print_str = 'Scan ' + str(self.num_scans) + ": Processing time is " + \
+                            str(self.total_processing_time_secs) + " secs"
+                print(print_str)
+                self.comms.notify('PLUME_DETECTOR_TOTAL_PROCESSING_TIME_SECS', self.total_processing_time_secs,
+                                  pymoos.time())
+
+                self.save_text_data()
+                self.clustering_pending = False
 
             time.sleep(0.02)  # 50Hz
             # TODO P1: Check for timeout if in active State
@@ -511,12 +546,10 @@ class PPlumeDetector():
         # Mask input image with the labelled regions image to create the labelled clustered image
         self.labelled_clustered_img = self.labelled_regions_img * self.seg_img
 
-        # Print clustering time
+        # Save clustering time
         end = time.time()
-        clustering_time = end - start
-        clustering_print_str = 'Scan ' + str(self.num_scans) + ": Clustering time is " + str(clustering_time) + " secs"
-        print(clustering_print_str)
-
+        self.clustering_time_secs = end - start
+        self.comms.notify('PLUME_DETECTOR_CLUSTERING_TIME_SECS', self.clustering_time_secs, pymoos.time())
 
         return
 
@@ -715,9 +748,11 @@ class PPlumeDetector():
         self.comms.notify('PLUME_DETECTOR_CLUSTER_CENTERS_LIST', self.cluster_centers_string, pymoos.time())
 
 
-    def save_plots(self):
+    def save_images(self):
+        '''Saves a set of original clustering images, as well as modified high-contrast viewable images'''
 
-        dir = os.path.join(self.img_save_path, 'raw')
+        ## Save original images
+        dir = self.orig_images_path
 
         filename = "Scan_" + str(self.num_scans) + "_Im1_Segmented_Unwarped.png"
         cv.imwrite(os.path.join(dir, filename), self.seg_scan_snapshot)
@@ -734,7 +769,8 @@ class PPlumeDetector():
         filename = "Scan_" + str(self.num_scans) + "_Img5_Clustered.png"
         cv.imwrite(os.path.join(dir, filename), self.labelled_clustered_img)
 
-        dir = os.path.join(self.img_save_path, 'viewable')
+        ## Increase image contrast and save
+        dir = self.viewable_images_path
 
         warped = self.create_sonar_image(self.scan_intensities)
         filename = "Scan_" + str(self.num_scans) + "_Img1_Input.png"
@@ -749,11 +785,33 @@ class PPlumeDetector():
         filename = "Scan_" + str(self.num_scans) + "_Img4_ClusterRegions.png"
         cv.imwrite(os.path.join(dir, filename), 255*self.cluster_regions_img)
 
-        # TODO: Use separate image
+        # Convert labelled clustered image to a black and white image
         filename = "Scan_" + str(self.num_scans) + "_Img5_Clustered.png"
-        self.labelled_clustered_img[self.labelled_clustered_img > 0] = 255
-        cv.imwrite(os.path.join(dir, filename), self.labelled_clustered_img)
+        self.clustered_img = np.zeros_like(self.labelled_clustered_img)
+        self.clustered_img[self.labelled_clustered_img > 0] = 255 # Pixel values > 0 are set to 255
+        cv.imwrite(os.path.join(dir, filename), self.clustered_img)
 
+    def save_text_data(self):
+
+        # Save text file with the viewable images
+        filename = "Scan_" + str(self.num_scans) + "_Data.txt"
+        file_path = os.path.join(self.viewable_images_path, filename)
+
+        date_time = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
+
+        with open(file_path, "w") as file:
+
+            # Write summary data
+            file.write("Timestamp: " + date_time + "\n")
+            file.write("Num Clusters: " + str(self.num_clusters) + "\n")
+            file.write("Total processing time: " + str(self.total_processing_time_secs) + " secs\n")
+            file.write("Clustering time: " + str(self.clustering_time_secs) + " secs\n\n")
+
+            # Write data for each cluster
+            # Note that cluster numbering starts at 1 (to match cluster pixel values)
+            for i in np.arange(1, self.num_clusters + 1, 1):
+                data = self.clusters[i].serialize()
+                file.write(str(data) + "\n")
 
     def create_plots(self):
 
@@ -839,7 +897,7 @@ class PPlumeDetector():
         plt.subplot_tool()
         plt.show()
         image_name = "Clustering_Steps_Scan_" + str(self.num_scans)
-        plt.savefig(os.path.join(self.img_save_path, image_name), dpi=400)
+        plt.savefig(os.path.join(self.data_save_path, image_name), dpi=400)
         #plt.clf()
 
         # ### Plot Clustering Overview ###
@@ -870,7 +928,7 @@ class PPlumeDetector():
         #
         # # plt.show()
         # image_name = "Clustering_Overview_Scan_" + str(self.num_scans)
-        # plt.savefig(os.path.join(self.img_save_path, image_name), dpi=400)
+        # plt.savefig(os.path.join(self.data_save_path, image_name), dpi=400)
         # plt.close(fig)
 
 
