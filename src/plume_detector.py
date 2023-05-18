@@ -99,6 +99,7 @@ class PPlumeDetector():
         self.labelled_regions_img = None # Cluster regions image, with unique label (pixel value) applied to each region
         self.labelled_clustered_img = None # seg_image * labelled_regions_img
         self.output_img = None
+        self.clustered_img_view = None
 
         self.num_scans = 0
         self.first_scan = True
@@ -156,6 +157,8 @@ class PPlumeDetector():
 
         try:
             os.mkdir(self.img_save_path)
+            os.mkdir(os.path.join(self.img_save_path,'raw'))
+            os.mkdir(os.path.join(self.img_save_path,'viewable'))
         except OSError as error:
             print(error)
 
@@ -173,7 +176,8 @@ class PPlumeDetector():
                 self.output_cluster_centers()
                 self.clustering_pending = False
 
-                self.create_plots()
+                self.save_plots()
+                #self.create_plots()
 
             time.sleep(0.02)  # 50Hz
             # TODO P1: Check for timeout if in active State
@@ -513,6 +517,7 @@ class PPlumeDetector():
         clustering_print_str = 'Scan ' + str(self.num_scans) + ": Clustering time is " + str(clustering_time) + " secs"
         print(clustering_print_str)
 
+
         return
 
     def calc_and_show_cluster_centers(self):
@@ -548,28 +553,28 @@ class PPlumeDetector():
             self.clusters[cluster_num].radius_pixels = radius
 
 
-        # Increase image resolution before adding circles so that they are not pixelated
-        scale = 4
-        dim = (int(self.output_img.shape[1]*scale), int(self.output_img.shape[0]*scale))
-        self.output_img = cv.resize(self.output_img, dim, interpolation = cv.INTER_NEAREST)
-        self.output_img = self.output_img.astype(np.uint8)
-        # Increment non-zero pixel values. Allows for '1' to be used for the cluster circles and centers
-        self.output_img = np.where(self.output_img > 0, self.output_img+1, self.output_img)
-
-        # Add cluster centers and circle encompassing the clusters to the image
-        for cluster_num in np.arange(1, self.num_clusters + 1, 1):
-
-            center_row = self.clusters[cluster_num].center_row
-            center_col = self.clusters[cluster_num].center_col
-            radius = self.clusters[cluster_num].radius_pixels
-
-            # Add cluster center to image
-            circle_center = (round(center_col * scale), round(center_row * scale))
-            self.output_img = cv.circle(self.output_img, circle_center, 3, 1, -1)
-
-            # Add circle encompassing the cluster
-            circle_radius = round(radius*scale + scale/2)
-            self.output_img = cv.circle(self.output_img, circle_center, circle_radius,1, 2, cv.LINE_8)
+        # # Increase image resolution before adding circles so that they are not pixelated
+        # scale = 4
+        # dim = (int(self.output_img.shape[1]*scale), int(self.output_img.shape[0]*scale))
+        # self.output_img = cv.resize(self.output_img, dim, interpolation = cv.INTER_NEAREST)
+        # self.output_img = self.output_img.astype(np.uint8)
+        # # Increment non-zero pixel values. Allows for '1' to be used for the cluster circles and centers
+        # self.output_img = np.where(self.output_img > 0, self.output_img+1, self.output_img)
+        #
+        # # Add cluster centers and circle encompassing the clusters to the image
+        # for cluster_num in np.arange(1, self.num_clusters + 1, 1):
+        #
+        #     center_row = self.clusters[cluster_num].center_row
+        #     center_col = self.clusters[cluster_num].center_col
+        #     radius = self.clusters[cluster_num].radius_pixels
+        #
+        #     # Add cluster center to image
+        #     circle_center = (round(center_col * scale), round(center_row * scale))
+        #     self.output_img = cv.circle(self.output_img, circle_center, 3, 1, -1)
+        #
+        #     # Add circle encompassing the cluster
+        #     circle_radius = round(radius*scale + scale/2)
+        #     self.output_img = cv.circle(self.output_img, circle_center, circle_radius,1, 2, cv.LINE_8)
 
         return
 
@@ -708,6 +713,47 @@ class PPlumeDetector():
         self.comms.notify('PLUME_DETECTOR_CLUSTER_RADIUS_M',cluster_radius_m, pymoos.time())
         self.comms.notify('PLUME_DETECTOR_NUM_CLUSTERS', self.num_clusters, pymoos.time())
         self.comms.notify('PLUME_DETECTOR_CLUSTER_CENTERS_LIST', self.cluster_centers_string, pymoos.time())
+
+
+    def save_plots(self):
+
+        dir = os.path.join(self.img_save_path, 'raw')
+
+        filename = "Scan_" + str(self.num_scans) + "_Im1_Segmented_Unwarped.png"
+        cv.imwrite(os.path.join(dir, filename), self.seg_scan_snapshot)
+
+        filename = "Scan_" + str(self.num_scans) + "_Im2_Segmented_Warped.png"
+        cv.imwrite(os.path.join(dir, filename), self.seg_img)
+
+        filename = "Scan_" + str(self.num_scans) + "_Img3_ClusteredCores.png"
+        cv.imwrite(os.path.join(dir, filename), self.clustered_cores_img)
+
+        filename = "Scan_" + str(self.num_scans) + "_Img4_LabelledRegions.png"
+        cv.imwrite(os.path.join(dir, filename), self.labelled_regions_img)
+
+        filename = "Scan_" + str(self.num_scans) + "_Img5_Clustered.png"
+        cv.imwrite(os.path.join(dir, filename), self.labelled_clustered_img)
+
+        dir = os.path.join(self.img_save_path, 'viewable')
+
+        warped = self.create_sonar_image(self.scan_intensities)
+        filename = "Scan_" + str(self.num_scans) + "_Img1_Input.png"
+        cv.imwrite(os.path.join(dir, filename), warped)
+
+        filename = "Scan_" + str(self.num_scans) + "_Img2_Segmented.png"
+        cv.imwrite(os.path.join(dir, filename), 255*self.seg_img)
+
+        filename = "Scan_" + str(self.num_scans) + "_Img3_ClusteredCores.png"
+        cv.imwrite(os.path.join(dir, filename), 255*self.clustered_cores_img)
+
+        filename = "Scan_" + str(self.num_scans) + "_Img4_ClusterRegions.png"
+        cv.imwrite(os.path.join(dir, filename), 255*self.cluster_regions_img)
+
+        # TODO: Use separate image
+        filename = "Scan_" + str(self.num_scans) + "_Img5_Clustered.png"
+        self.labelled_clustered_img[self.labelled_clustered_img > 0] = 255
+        cv.imwrite(os.path.join(dir, filename), self.labelled_clustered_img)
+
 
     def create_plots(self):
 
