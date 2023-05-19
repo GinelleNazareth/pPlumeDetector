@@ -71,6 +71,7 @@ class PPlumeDetector():
         self.image_width_pixels = 400# Width in pixels of sonar images
         # Distance between the Ping360 and INS center, measured along the vehicle's longitudinal axis
         self.instrument_offset_x_m = 3
+        self.num_cluster_outputs = 5
 
         # Constants
         self.grads_to_rads = np.pi/200 #400 gradians per 360 degs
@@ -123,7 +124,7 @@ class PPlumeDetector():
 
         self.num_clusters = 0
         self.clusters = [] # List of Cluster data structures
-        self.output_cluster_num = 0  # Index of the cluster with the largest radius
+        self.sorted_clusters = [] # List of Cluster data structures, sorted based on cluster radius (largest to smallest)
         self.cluster_centers_string = ""
 
         self.clustering_time_secs = None
@@ -198,9 +199,8 @@ class PPlumeDetector():
                 self.calc_cluster_centers()
                 self.get_cluster_center_nav()
                 self.georeference_clusters()
-                self.output_cluster_centers()
+                self.output_sorted_cluster_centers()
                 self.save_images()
-                #self.create_plots()
 
                 # Calculate and output the total processing time
                 end_time = time.time()
@@ -502,9 +502,9 @@ class PPlumeDetector():
 
         # Ensure widow width is at least 3 pixels
         if self.window_width_pixels < 3:
-            print('Clipping clustering window with to 3 pixels (minimum)')
+            print('Clipping clustering block with to 3 pixels (minimum)')
             self.window_width_pixels = 3
-        self.comms.notify('PLUME_DETECTOR_WINDOW_WIDTH', self.window_width_pixels, pymoos.time())
+        self.comms.notify('PLUME_DETECTOR_CLUSTERING_BLOCK_WIDTH', self.window_width_pixels, pymoos.time())
 
         # Convert minimum fill from percentage to pixels
         window_rows = self.window_width_pixels
@@ -556,14 +556,13 @@ class PPlumeDetector():
     def calc_cluster_centers(self):
         '''Calculates the cluster centers and radii, and draws them on the output image'''
 
-        self.clusters = [Cluster() for i in range(self.num_clusters+1)]
+        self.clusters = [Cluster() for i in range(self.num_clusters)]
 
         # Calculate cluster centers and radii
-        # Note that cluster numbering starts at 1 (to match cluster pixel values)
-        for cluster_num in np.arange(1,self.num_clusters+1,1):
+        for cluster_idx in np.arange(self.num_clusters):
 
-            # Get indices of cluster pixels
-            indices = np.nonzero(self.labelled_clustered_img==cluster_num)
+            # Get indices of cluster pixels.
+            indices = np.nonzero(self.labelled_clustered_img == (cluster_idx+1))
 
             # Calculate center coordinates
             center_row = indices[0].mean()
@@ -575,14 +574,13 @@ class PPlumeDetector():
             for i in range(len(indices[0])):
                 point = np.array([indices[0][i], indices[1][i]])
                 dist = np.linalg.norm(point - center)
-                #dist = math.dist(center, point)
                 if dist > radius:
                     radius = dist
 
             # Save values in clusters data structure
-            self.clusters[cluster_num].center_row = center_row
-            self.clusters[cluster_num].center_col = center_col
-            self.clusters[cluster_num].radius_pixels = radius
+            self.clusters[cluster_idx].center_row = center_row
+            self.clusters[cluster_idx].center_col = center_col
+            self.clusters[cluster_idx].radius_pixels = radius
 
         return
 
@@ -591,8 +589,7 @@ class PPlumeDetector():
 
         num_rows = num_cols = self.labelled_clustered_img.shape[0]  # Assumes square image
 
-        # Note that cluster numbering starts at 1 (to match cluster pixel values)
-        for i in np.arange(1,self.num_clusters+1,1):
+        for i in np.arange(self.num_clusters):
             # Cluster center coordinates relative to the top left corner of the image
             row = self.clusters[i].center_row
             col = self.clusters[i].center_col
@@ -601,10 +598,11 @@ class PPlumeDetector():
             x = row - (num_rows - 1)/2
             y = -1 * (col - (num_cols - 1)/2)
 
+            # Calculate sonar transmit angle at the time that the cluster center was scanned
             theta_rads = math.atan2(y,x)
-            theta_degs = theta_rads * 180/math.pi
             theta_grads = round(theta_rads * self.rads_to_grads)
 
+            # Retrieve nav data at the time that the cluster center was scanned, using the sonar transmit angle
             self.clusters[i].nav_x = self.nav_x_history[theta_grads]
             self.clusters[i].nav_y = self.nav_y_history[theta_grads]
             self.clusters[i].nav_heading = self.nav_heading_history[theta_grads]
@@ -618,8 +616,7 @@ class PPlumeDetector():
         num_rows = num_cols = self.labelled_clustered_img.shape[0] # Assumes square image
         meters_per_pixel = (2 * self.range_m) / self.image_width_pixels
 
-        # Note that cluster numbering starts at 1 (to match cluster pixel values)
-        for i in np.arange(1,self.num_clusters+1,1):
+        for i in np.arange(self.num_clusters):
 
             # Retrieve cluster center and radius in image coordinates
             center_row = self.clusters[i].center_row
@@ -666,62 +663,55 @@ class PPlumeDetector():
 
         return
 
-    def output_cluster_centers(self):
-        '''Identifies the largest cluster and sets cluster outputs for the app'''
+    def output_sorted_cluster_centers(self):
+        '''Sorts the clusters in order of radius (largest to smallest) and sets the cluster outputs for the app'''
 
-        self.output_cluster_num = 0
         self.cluster_centers_string = ""
 
-        # Set all outputs to 0 if no clusters are detected
-        if self.num_clusters == 0:
-            self.comms.notify('PLUME_DETECTOR_CLUSTER_DETECTED', 0, pymoos.time())
-            self.comms.notify('PLUME_DETECTOR_CLUSTER_CENTER_X_M', 0, pymoos.time())
-            self.comms.notify('PLUME_DETECTOR_CLUSTER_CENTER_Y_M', 0, pymoos.time())
-            self.comms.notify('PLUME_DETECTOR_CLUSTER_CENTER_LAT', 0, pymoos.time())
-            self.comms.notify('PLUME_DETECTOR_CLUSTER_CENTER_LONG', 0, pymoos.time())
-            self.comms.notify('PLUME_DETECTOR_CLUSTER_RADIUS_M', 0, pymoos.time())
-            self.comms.notify('PLUME_DETECTOR_NUM_CLUSTERS', 0, pymoos.time())
-            self.comms.notify('PLUME_DETECTOR_CLUSTER_CENTERS_LIST', "", pymoos.time())
-            return
-
-        # Identify the largest cluster
-        max_radius_m = 0
-        # Note that cluster numbering starts at 1 (to match cluster pixel values)
-        for i in np.arange(1, self.num_clusters + 1, 1):
-            if self.clusters[i].radius_m > max_radius_m:
-                self.output_cluster_num = i
-                max_radius_m = self.clusters[i].radius_m
+        # Sort list of clusters based on radius (largest to smallest)
+        self.sorted_clusters = sorted(self.clusters, key=lambda cluster_i: cluster_i.radius_m, reverse=True)
 
         # Assemble string with cluster centers list
         # Sample format: <cluster 1 x>,<cluster 1 y>,<cluster 1 radius>:<cluster 2 x>,<cluster 2 y>,<cluster 2 radius>
         centers = ""
-        for i in np.arange(1, self.num_clusters + 1, 1):
-
+        for i in np.arange(self.num_clusters):
+            cluster = self.sorted_clusters[i]
             # Add cluster <local_x,local_y,radius_m> to string
-            centers = centers + "{:.2f}".format(self.clusters[i].local_x) + ","
-            centers = centers + "{:.2f}".format(self.clusters[i].local_y) + ","
-            centers = centers + "{:.2f}".format(self.clusters[i].radius_m)
+            centers = centers + "{:.2f}".format(cluster.local_x) + ","
+            centers = centers + "{:.2f}".format(cluster.local_y) + ","
+            centers = centers + "{:.2f}".format(cluster.radius_m)
 
             # Add colon delimiter between info for each cluster
-            if i < self.num_clusters:
+            if i < (self.num_clusters-1):
                 centers = centers + ":"
         self.cluster_centers_string = centers
 
-        # Set outputs
-        cluster_x = self.clusters[self.output_cluster_num].local_x
-        cluster_y = self.clusters[self.output_cluster_num].local_y
-        cluster_lat = self.clusters[self.output_cluster_num].lat
-        cluster_long = self.clusters[self.output_cluster_num].long
-        cluster_radius_m = self.clusters[self.output_cluster_num].radius_m
-        self.comms.notify('PLUME_DETECTOR_CLUSTER_DETECTED', 1, pymoos.time())
-        self.comms.notify('PLUME_DETECTOR_CLUSTER_CENTER_X_M', cluster_x, pymoos.time())
-        self.comms.notify('PLUME_DETECTOR_CLUSTER_CENTER_Y_M', cluster_y, pymoos.time())
-        self.comms.notify('PLUME_DETECTOR_CLUSTER_CENTER_LAT', cluster_lat, pymoos.time())
-        self.comms.notify('PLUME_DETECTOR_CLUSTER_CENTER_LONG', cluster_long, pymoos.time())
-        self.comms.notify('PLUME_DETECTOR_CLUSTER_RADIUS_M',cluster_radius_m, pymoos.time())
+        # Output number of clusters and cluster centers list
         self.comms.notify('PLUME_DETECTOR_NUM_CLUSTERS', self.num_clusters, pymoos.time())
         self.comms.notify('PLUME_DETECTOR_CLUSTER_CENTERS_LIST', self.cluster_centers_string, pymoos.time())
 
+        # Output the center coordinates  and radius of each cluster. If there are more outputs than detected clusters,
+        # those outputs are set to 0.
+        for i in range(self.num_cluster_outputs):
+
+            # Construct variable name using cluster number
+            cluster_num = i+1 #Numbering of cluster outputs starts at 1
+            cluster_x_name = 'PLUME_DETECTOR_CLUSTER_'+ str(cluster_num)+ '_X_M'
+            cluster_y_name = 'PLUME_DETECTOR_CLUSTER_' + str(cluster_num) + '_Y_M'
+            cluster_radius_name = 'PLUME_DETECTOR_CLUSTER_' + str(cluster_num) + '_RADIUS_M'
+
+            if i < self.num_clusters:
+                # Output the center coordinates  and radius of each cluster.
+                cluster = self.sorted_clusters[i]
+                self.comms.notify(cluster_x_name, cluster.local_x, pymoos.time())
+                self.comms.notify(cluster_y_name, cluster.local_y, pymoos.time())
+                self.comms.notify(cluster_radius_name, cluster.radius_m, pymoos.time())
+
+            else:
+                # Outputs which number more than the detected clusters are set to 0
+                self.comms.notify(cluster_x_name, 0, pymoos.time())
+                self.comms.notify(cluster_y_name, 0, pymoos.time())
+                self.comms.notify(cluster_radius_name, 0, pymoos.time())
 
     def save_images(self):
         '''Saves a set of original clustering images, as well as modified high-contrast viewable images'''
@@ -767,25 +757,24 @@ class PPlumeDetector():
         cv.imwrite(os.path.join(dir, filename), self.clustered_img)
 
     def save_text_data(self):
+        ''' Create test file with summary info for the scan, as well as detailed info for each cluster '''
 
         # Save text file with the viewable images
         filename = "Scan_" + str(self.num_scans) + "_Data.txt"
         file_path = os.path.join(self.viewable_images_path, filename)
 
-        date_time = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
-
         with open(file_path, "w") as file:
 
             # Write summary data
+            date_time = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
             file.write("Timestamp: " + date_time + "\n")
             file.write("Num Clusters: " + str(self.num_clusters) + "\n")
             file.write("Total processing time: " + str(self.total_processing_time_secs) + " secs\n")
             file.write("Clustering time: " + str(self.clustering_time_secs) + " secs\n\n")
 
             # Write data for each cluster
-            # Note that cluster numbering starts at 1 (to match cluster pixel values)
-            for i in np.arange(1, self.num_clusters + 1, 1):
-                data = self.clusters[i].serialize()
+            for i in np.arange(self.num_clusters):
+                data = self.sorted_clusters[i].serialize()
                 file.write(str(data) + "\n")
 
     def create_output_image(self):
@@ -803,11 +792,11 @@ class PPlumeDetector():
         self.output_img = np.where(self.output_img > 0, self.output_img+1, self.output_img)
 
         # Add cluster centers and circle encompassing the clusters to the image
-        for cluster_num in np.arange(1, self.num_clusters + 1, 1):
+        for i in np.arange(self.num_clusters):
 
-            center_row = self.clusters[cluster_num].center_row
-            center_col = self.clusters[cluster_num].center_col
-            radius = self.clusters[cluster_num].radius_pixels
+            center_row = self.clusters[i].center_row
+            center_col = self.clusters[i].center_col
+            radius = self.clusters[i].radius_pixels
 
             # Add cluster center to image
             circle_center = (round(center_col * scale), round(center_row * scale))
