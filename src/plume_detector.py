@@ -166,16 +166,21 @@ class PPlumeDetector():
         }
 
     def run(self):
+
+        # Setup pymoos comms
         print("Initial State: {0}".format(self.state_string))
         self.comms.set_on_connect_callback(self.on_connect)
         self.comms.set_on_mail_callback(self.on_mail)
         self.comms.run('localhost', 9000, 'p_plume_detector')
 
-        # Create directory for saving images
+        # Create folder for saving images. Save in /log directory if it exists, otherwise use current directory
         date_time = datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')
         folder_name = "plume_detector_data_" + date_time
-        parent_dir  = os.path.dirname(__file__)
-        self.data_save_path = os.path.join(parent_dir, folder_name)
+        if os.path.exists("/log"):
+            log_dir = "/log"
+        else:
+            log_dir  = os.path.dirname(__file__)
+        self.data_save_path = os.path.join(log_dir, folder_name)
         self.orig_images_path = os.path.join(self.data_save_path, "orig_images")
         self.viewable_images_path = os.path.join(self.data_save_path, "viewable_images")
 
