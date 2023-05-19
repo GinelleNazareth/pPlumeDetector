@@ -195,7 +195,7 @@ class PPlumeDetector():
                 # Warp data into image with cartesian co-ordinates, then cluster
                 self.seg_img = self.create_sonar_image(self.seg_scan_snapshot)
                 self.cluster()
-                self.calc_and_show_cluster_centers()
+                self.calc_cluster_centers()
                 self.get_cluster_center_nav()
                 self.georeference_clusters()
                 self.output_cluster_centers()
@@ -553,11 +553,10 @@ class PPlumeDetector():
 
         return
 
-    def calc_and_show_cluster_centers(self):
+    def calc_cluster_centers(self):
         '''Calculates the cluster centers and radii, and draws them on the output image'''
 
         self.clusters = [Cluster() for i in range(self.num_clusters+1)]
-        self.output_img = copy.deepcopy(self.labelled_clustered_img)
 
         # Calculate cluster centers and radii
         # Note that cluster numbering starts at 1 (to match cluster pixel values)
@@ -584,30 +583,6 @@ class PPlumeDetector():
             self.clusters[cluster_num].center_row = center_row
             self.clusters[cluster_num].center_col = center_col
             self.clusters[cluster_num].radius_pixels = radius
-
-
-        # # Increase image resolution before adding circles so that they are not pixelated
-        # scale = 4
-        # dim = (int(self.output_img.shape[1]*scale), int(self.output_img.shape[0]*scale))
-        # self.output_img = cv.resize(self.output_img, dim, interpolation = cv.INTER_NEAREST)
-        # self.output_img = self.output_img.astype(np.uint8)
-        # # Increment non-zero pixel values. Allows for '1' to be used for the cluster circles and centers
-        # self.output_img = np.where(self.output_img > 0, self.output_img+1, self.output_img)
-        #
-        # # Add cluster centers and circle encompassing the clusters to the image
-        # for cluster_num in np.arange(1, self.num_clusters + 1, 1):
-        #
-        #     center_row = self.clusters[cluster_num].center_row
-        #     center_col = self.clusters[cluster_num].center_col
-        #     radius = self.clusters[cluster_num].radius_pixels
-        #
-        #     # Add cluster center to image
-        #     circle_center = (round(center_col * scale), round(center_row * scale))
-        #     self.output_img = cv.circle(self.output_img, circle_center, 3, 1, -1)
-        #
-        #     # Add circle encompassing the cluster
-        #     circle_radius = round(radius*scale + scale/2)
-        #     self.output_img = cv.circle(self.output_img, circle_center, circle_radius,1, 2, cv.LINE_8)
 
         return
 
@@ -812,6 +787,36 @@ class PPlumeDetector():
             for i in np.arange(1, self.num_clusters + 1, 1):
                 data = self.clusters[i].serialize()
                 file.write(str(data) + "\n")
+
+    def create_output_image(self):
+        ''' Creates the output image, by copying the labelled clustered image, and adding the cluster centers and
+        circles to show to the cluster radii. This function is only meant to be used for post-processing.'''
+
+        self.output_img = copy.deepcopy(self.labelled_clustered_img)
+
+        # Increase image resolution before adding circles so that they are not pixelated
+        scale = 4
+        dim = (int(self.output_img.shape[1]*scale), int(self.output_img.shape[0]*scale))
+        self.output_img = cv.resize(self.output_img, dim, interpolation = cv.INTER_NEAREST)
+        self.output_img = self.output_img.astype(np.uint8)
+        # Increment non-zero pixel values. Allows for '1' to be used for the cluster circles and centers
+        self.output_img = np.where(self.output_img > 0, self.output_img+1, self.output_img)
+
+        # Add cluster centers and circle encompassing the clusters to the image
+        for cluster_num in np.arange(1, self.num_clusters + 1, 1):
+
+            center_row = self.clusters[cluster_num].center_row
+            center_col = self.clusters[cluster_num].center_col
+            radius = self.clusters[cluster_num].radius_pixels
+
+            # Add cluster center to image
+            circle_center = (round(center_col * scale), round(center_row * scale))
+            self.output_img = cv.circle(self.output_img, circle_center, 3, 1, -1)
+
+            # Add circle encompassing the cluster
+            circle_radius = round(radius*scale + scale/2)
+            self.output_img = cv.circle(self.output_img, circle_center, circle_radius,1, 2, cv.LINE_8)
+
 
     def create_plots(self):
 
