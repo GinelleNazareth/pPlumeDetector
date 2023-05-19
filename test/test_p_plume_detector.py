@@ -27,6 +27,13 @@ class TestGeoreferencing(TestPPlumeDetector):
 
         self.detector.instrument_offset_x_m = 0
 
+        self.detector.clusters[0].center_row = 301.5
+        self.detector.clusters[0].center_col = 301.5
+        self.detector.clusters[0].radius_pixels = 40
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_heading = 0
+
         self.detector.clusters[1].center_row = 101.5
         self.detector.clusters[1].center_col = 301.5
         self.detector.clusters[1].radius_pixels = 10
@@ -48,14 +55,10 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.detector.clusters[3].nav_x = 0
         self.detector.clusters[3].nav_heading = 0
 
-        self.detector.clusters[4].center_row = 301.5
-        self.detector.clusters[4].center_col = 301.5
-        self.detector.clusters[4].radius_pixels = 40
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_heading = 0
-
         self.detector.georeference_clusters()
+
+        self.assertAlmostEqual(self.detector.clusters[0].local_x, 25.0, places=2)
+        self.assertAlmostEqual(self.detector.clusters[0].local_y, -25.0, places=2)
 
         self.assertAlmostEqual(self.detector.clusters[1].local_x, 25.0, places=2)
         self.assertAlmostEqual(self.detector.clusters[1].local_y, 25.0, places=2)
@@ -66,19 +69,24 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.assertAlmostEqual(self.detector.clusters[3].local_x, -25.0, places=2)
         self.assertAlmostEqual(self.detector.clusters[3].local_y, -25.0, places=2)
 
-        self.assertAlmostEqual(self.detector.clusters[4].local_x, 25.0, places=2)
-        self.assertAlmostEqual(self.detector.clusters[4].local_y, -25.0, places=2)
-
+        self.assertEqual(self.detector.clusters[0].radius_m, 10.0)
         self.assertEqual(self.detector.clusters[1].radius_m, 2.5)
         self.assertEqual(self.detector.clusters[2].radius_m, 5.0)
         self.assertEqual(self.detector.clusters[3].radius_m, 7.5)
-        self.assertEqual(self.detector.clusters[4].radius_m, 10.0)
+
 
 
     # Test 2 - Cluster detections in each of the four quadrants. Added instrument offset. No nav offset or heading rotations
     def test2(self):
 
         self.detector.instrument_offset_x_m = 5
+
+        self.detector.clusters[0].center_row = 301.5
+        self.detector.clusters[0].center_col = 301.5
+        self.detector.clusters[0].radius_pixels = 10
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_heading = 0
 
         self.detector.clusters[1].center_row = 101.5
         self.detector.clusters[1].center_col = 301.5
@@ -101,14 +109,10 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.detector.clusters[3].nav_x = 0
         self.detector.clusters[3].nav_heading = 0
 
-        self.detector.clusters[4].center_row = 301.5
-        self.detector.clusters[4].center_col = 301.5
-        self.detector.clusters[4].radius_pixels = 10
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_heading = 0
-
         self.detector.georeference_clusters()
+
+        self.assertAlmostEqual(self.detector.clusters[0].local_x, 25.0, places=2)
+        self.assertAlmostEqual(self.detector.clusters[0].local_y, -20.0, places=2)
 
         self.assertAlmostEqual(self.detector.clusters[1].local_x, 25.0, places=2)
         self.assertAlmostEqual(self.detector.clusters[1].local_y, 30.0, places=2)
@@ -119,12 +123,17 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.assertAlmostEqual(self.detector.clusters[3].local_x, -25.0, places=2)
         self.assertAlmostEqual(self.detector.clusters[3].local_y, -20.0, places=2)
 
-        self.assertAlmostEqual(self.detector.clusters[4].local_x, 25.0, places=2)
-        self.assertAlmostEqual(self.detector.clusters[4].local_y, -20.0, places=2)
 
     # Test 3 - Cluster detections in each of the four quadrants. 45 deg  heading rotation. No instrument offset or nav offset
     def test3(self):
         self.detector.instrument_offset_x_m = 0
+
+        self.detector.clusters[0].center_row = 301.5
+        self.detector.clusters[0].center_col = 301.5
+        self.detector.clusters[0].radius_pixels = 10
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_heading = 45
 
         self.detector.clusters[1].center_row = 101.5
         self.detector.clusters[1].center_col = 301.5
@@ -147,14 +156,10 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.detector.clusters[3].nav_x = 0
         self.detector.clusters[3].nav_heading = 45
 
-        self.detector.clusters[4].center_row = 301.5
-        self.detector.clusters[4].center_col = 301.5
-        self.detector.clusters[4].radius_pixels = 10
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_heading = 45
-
         self.detector.georeference_clusters()
+
+        self.assertAlmostEqual(self.detector.clusters[0].local_x, 0.0, places=2)
+        self.assertAlmostEqual(self.detector.clusters[0].local_y, -35.355, places=2)
 
         self.assertAlmostEqual(self.detector.clusters[1].local_x, 35.355, places=2)
         self.assertAlmostEqual(self.detector.clusters[1].local_y, 0.0, places=2)
@@ -165,13 +170,17 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.assertAlmostEqual(self.detector.clusters[3].local_x, -35.355, places=2)
         self.assertAlmostEqual(self.detector.clusters[3].local_y, 0.0, places=2)
 
-        self.assertAlmostEqual(self.detector.clusters[4].local_x, 0.0, places=2)
-        self.assertAlmostEqual(self.detector.clusters[4].local_y, -35.355, places=2)
-
 
     # Test 4 - Cluster detections in each of the four quadrants. 135 deg  heading rotation. No instrument offset or nav offset
     def test4(self):
         self.detector.instrument_offset_x_m = 0
+
+        self.detector.clusters[0].center_row = 301.5
+        self.detector.clusters[0].center_col = 301.5
+        self.detector.clusters[0].radius_pixels = 10
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_heading = 135
 
         self.detector.clusters[1].center_row = 101.5
         self.detector.clusters[1].center_col = 301.5
@@ -194,14 +203,10 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.detector.clusters[3].nav_x = 0
         self.detector.clusters[3].nav_heading = 135
 
-        self.detector.clusters[4].center_row = 301.5
-        self.detector.clusters[4].center_col = 301.5
-        self.detector.clusters[4].radius_pixels = 10
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_heading = 135
-
         self.detector.georeference_clusters()
+
+        self.assertAlmostEqual(self.detector.clusters[0].local_x, -35.355, places=2)
+        self.assertAlmostEqual(self.detector.clusters[0].local_y, 0.0, places=2)
 
         self.assertAlmostEqual(self.detector.clusters[1].local_x, 0.0, places=2)
         self.assertAlmostEqual(self.detector.clusters[1].local_y, -35.355, places=2)
@@ -212,13 +217,17 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.assertAlmostEqual(self.detector.clusters[3].local_x, 0.0, places=2)
         self.assertAlmostEqual(self.detector.clusters[3].local_y, 35.355, places=2)
 
-        self.assertAlmostEqual(self.detector.clusters[4].local_x, -35.355, places=2)
-        self.assertAlmostEqual(self.detector.clusters[4].local_y, 0.0, places=2)
-
 
     # Test 5 - Cluster detections in each of the four quadrants. 225 deg  heading rotation. No instrument offset or nav offset
     def test5(self):
         self.detector.instrument_offset_x_m = 0
+
+        self.detector.clusters[0].center_row = 301.5
+        self.detector.clusters[0].center_col = 301.5
+        self.detector.clusters[0].radius_pixels = 10
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_heading = 225
 
         self.detector.clusters[1].center_row = 101.5
         self.detector.clusters[1].center_col = 301.5
@@ -241,14 +250,10 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.detector.clusters[3].nav_x = 0
         self.detector.clusters[3].nav_heading = 225
 
-        self.detector.clusters[4].center_row = 301.5
-        self.detector.clusters[4].center_col = 301.5
-        self.detector.clusters[4].radius_pixels = 10
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_heading = 225
-
         self.detector.georeference_clusters()
+
+        self.assertAlmostEqual(self.detector.clusters[0].local_x, 0.0, places=2)
+        self.assertAlmostEqual(self.detector.clusters[0].local_y, 35.355, places=2)
 
         self.assertAlmostEqual(self.detector.clusters[1].local_x, -35.355, places=2)
         self.assertAlmostEqual(self.detector.clusters[1].local_y, 0.0, places=2)
@@ -259,13 +264,17 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.assertAlmostEqual(self.detector.clusters[3].local_x, 35.355, places=2)
         self.assertAlmostEqual(self.detector.clusters[3].local_y, 0.0, places=2)
 
-        self.assertAlmostEqual(self.detector.clusters[4].local_x, 0.0, places=2)
-        self.assertAlmostEqual(self.detector.clusters[4].local_y, 35.355, places=2)
-
 
     # Test 6 - Cluster detections in each of the four quadrants. 315 deg  heading rotation. No instrument offset or nav offset
     def test6(self):
         self.detector.instrument_offset_x_m = 0
+
+        self.detector.clusters[0].center_row = 301.5
+        self.detector.clusters[0].center_col = 301.5
+        self.detector.clusters[0].radius_pixels = 10
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_heading = 315
 
         self.detector.clusters[1].center_row = 101.5
         self.detector.clusters[1].center_col = 301.5
@@ -288,14 +297,10 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.detector.clusters[3].nav_x = 0
         self.detector.clusters[3].nav_heading = 315
 
-        self.detector.clusters[4].center_row = 301.5
-        self.detector.clusters[4].center_col = 301.5
-        self.detector.clusters[4].radius_pixels = 10
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_heading = 315
-
         self.detector.georeference_clusters()
+
+        self.assertAlmostEqual(self.detector.clusters[0].local_x, 35.355, places=2)
+        self.assertAlmostEqual(self.detector.clusters[0].local_y, 0.0, places=2)
 
         self.assertAlmostEqual(self.detector.clusters[1].local_x, 0.0, places=2)
         self.assertAlmostEqual(self.detector.clusters[1].local_y, 35.355, places=2)
@@ -306,13 +311,17 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.assertAlmostEqual(self.detector.clusters[3].local_x, 0.0, places=2)
         self.assertAlmostEqual(self.detector.clusters[3].local_y, -35.355, places=2)
 
-        self.assertAlmostEqual(self.detector.clusters[4].local_x, 35.355, places=2)
-        self.assertAlmostEqual(self.detector.clusters[4].local_y, 0.0, places=2)
-
 
     # Test 7 - Cluster detections in each of the four quadrants. Added nav offset. No instrument offset of heading rotation
     def test7(self):
         self.detector.instrument_offset_x_m = 0
+
+        self.detector.clusters[0].center_row = 301.5
+        self.detector.clusters[0].center_col = 301.5
+        self.detector.clusters[0].radius_pixels = 10
+        self.detector.clusters[0].nav_x = 25
+        self.detector.clusters[0].nav_y = 50
+        self.detector.clusters[0].nav_heading = 0
 
         self.detector.clusters[1].center_row = 101.5
         self.detector.clusters[1].center_col = 301.5
@@ -335,14 +344,10 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.detector.clusters[3].nav_y = 50
         self.detector.clusters[3].nav_heading = 0
 
-        self.detector.clusters[4].center_row = 301.5
-        self.detector.clusters[4].center_col = 301.5
-        self.detector.clusters[4].radius_pixels = 10
-        self.detector.clusters[4].nav_x = 25
-        self.detector.clusters[4].nav_y = 50
-        self.detector.clusters[4].nav_heading = 0
-
         self.detector.georeference_clusters()
+
+        self.assertAlmostEqual(self.detector.clusters[0].local_x, 50.0, places=2)
+        self.assertAlmostEqual(self.detector.clusters[0].local_y, 25.0, places=2)
 
         self.assertAlmostEqual(self.detector.clusters[1].local_x, 50.0, places=2)
         self.assertAlmostEqual(self.detector.clusters[1].local_y, 75.0, places=2)
@@ -353,16 +358,21 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.assertAlmostEqual(self.detector.clusters[3].local_x, 0.0, places=2)
         self.assertAlmostEqual(self.detector.clusters[3].local_y, 25.0, places=2)
 
-        self.assertAlmostEqual(self.detector.clusters[4].local_x, 50.0, places=2)
-        self.assertAlmostEqual(self.detector.clusters[4].local_y, 25.0, places=2)
 
     # Test 8 - Tests output_cluster_centers function
     def test8(self):
         self.detector.instrument_offset_x_m = 0
 
+        self.detector.clusters[0].center_row = 301.5
+        self.detector.clusters[0].center_col = 301.5
+        self.detector.clusters[0].radius_pixels = 10
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_x = 0
+        self.detector.clusters[0].nav_heading = 0
+
         self.detector.clusters[1].center_row = 101.5
         self.detector.clusters[1].center_col = 301.5
-        self.detector.clusters[1].radius_pixels = 10
+        self.detector.clusters[1].radius_pixels = 40
         self.detector.clusters[1].nav_x = 0
         self.detector.clusters[1].nav_x = 0
         self.detector.clusters[1].nav_heading = 0
@@ -381,17 +391,9 @@ class TestGeoreferencing(TestPPlumeDetector):
         self.detector.clusters[3].nav_x = 0
         self.detector.clusters[3].nav_heading = 0
 
-        self.detector.clusters[4].center_row = 301.5
-        self.detector.clusters[4].center_col = 301.5
-        self.detector.clusters[4].radius_pixels = 10
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_x = 0
-        self.detector.clusters[4].nav_heading = 0
-
         self.detector.georeference_clusters()
-        self.detector.output_cluster_centers()
+        self.detector.output_sorted_cluster_centers()
 
-        self.assertEqual(self.detector.output_cluster_num, 3)
-        self.assertEqual(self.detector.cluster_centers_string, "25.00,25.00,2.50:-25.00,25.00,5.00:-25.00,-25.00,7.50:25.00,-25.00,2.50")
+        self.assertEqual(self.detector.cluster_centers_string, "25.00,25.00,10.00:-25.00,-25.00,7.50:-25.00,25.00,5.00:25.00,-25.00,2.50")
 
 
