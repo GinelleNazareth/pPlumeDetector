@@ -104,7 +104,7 @@ if __name__ == "__main__":
             plume_detector.calc_cluster_centers()
             plume_detector.get_cluster_center_nav()
             plume_detector.georeference_clusters()
-            plume_detector.output_cluster_centers()
+            plume_detector.output_sorted_cluster_centers()
             plume_detector.create_output_image()
 
             scan_num += 1
