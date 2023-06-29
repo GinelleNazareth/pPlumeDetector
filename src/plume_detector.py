@@ -172,6 +172,7 @@ class PPlumeDetector():
         self.comms.set_on_connect_callback(self.on_connect)
         self.comms.set_on_mail_callback(self.on_mail)
         self.comms.run('localhost', 9000, 'p_plume_detector')
+        #self.comms.run('192.168.56.104', 9000, 'p_plume_detector')
 
         # Create folder for saving images. Save in /log directory if it exists, otherwise use current directory
         date_time = datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')
@@ -437,7 +438,7 @@ class PPlumeDetector():
         # Ensure that dataset is the correct size
         intensities = np.frombuffer(self.device_data_msg.data, dtype=np.uint8) # Convert intensity data bytearray to numpy array
         if intensities.size != self.num_samples:
-            print("Intensities array length ({0}) does not match number of samples ({1}). Data not stored".format(intensities.size))
+            print("Intensities array length ({0}) does not match number of samples ({1}). Data not stored".format(intensities.size, self.num_samples))
             return False
 
         # Save the intensity data
