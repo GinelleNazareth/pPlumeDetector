@@ -9,6 +9,7 @@ import os
 import re
 from matplotlib import rcParams
 
+# To use script, set file name and ensure that script parameters match sonar data
 
 rcParams['font.family'] = 'serif'
 
@@ -24,6 +25,8 @@ start_time = "18:30:00.000"
 
 #start_time = "00:00:30.000"
 #start_time = "00:10:00.000"
+
+# Script parameters
 start_angle_grads = 33
 stop_angle_grads = 167
 num_samples = 1200
