@@ -68,6 +68,7 @@ class PPlumeDetector():
         self.threshold = 0.3 * 255 #0.5 * 255
         self.window_width_m = 1.0 #0.5 # Clustering window size
         self.cluster_min_fill_percent = 30 #50
+        self.noise_range_m = 2 # Range within which data is ignored (usually just noise)
         self.image_width_pixels = 400# Width in pixels of sonar images
         # Distance between the Ping360 and INS center, measured along the vehicle's longitudinal axis
         self.instrument_offset_x_m = 3
@@ -102,7 +103,6 @@ class PPlumeDetector():
         # Matrix containing raw intensity data for a complete scan of pings between the start and stop angles
         self.scan_intensities = None
         self.scan_intensities_denoised = None # Scan intensities with the central noise data removed
-        self.noise_range_m = 1 # Range within which data is ignored (usually just noise)
 
         # Matrix containing segmented data (i.e. result from thresholding) from the scan of the entire sonar swath.
         # Row indexes define the sample number and each column is for a different scan angle
