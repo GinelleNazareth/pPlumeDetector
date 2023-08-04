@@ -7,7 +7,7 @@ import copy
 from matplotlib import pyplot as plt
 import os
 
-input = cv.imread('colours_angle_labels2.png')
+input = cv.imread('colours_angle_labels.png')
 cv.imshow('input',input)
 
 input_mod = copy.deepcopy(input)
