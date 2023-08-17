@@ -66,8 +66,8 @@ class PPlumeDetector():
 
         # Algorithm Parameters
         self.threshold = 0.3 * 255 #0.5 * 255
-        self.window_width_m = 1.0 #0.5 # Clustering window size
-        self.cluster_min_fill_percent = 30 #50
+        self.window_width_m = 1.0 # Clustering window size
+        self.cluster_min_fill_percent = 30
         self.noise_range_m = 2 # Range within which data is ignored (usually just noise)
         self.image_width_pixels = 400# Width in pixels of sonar images
         # Distance between the Ping360 and INS center, measured along the vehicle's longitudinal axis
@@ -555,7 +555,22 @@ class PPlumeDetector():
         # Save clustering time
         end = time.time()
         self.clustering_time_secs = end - start
+        #print("Plume Detector Clustering time is ", self.clustering_time_secs)
         self.comms.notify('PLUME_DETECTOR_CLUSTERING_TIME_SECS', self.clustering_time_secs, pymoos.time())
+
+        # Compute number of cluster pixels
+        binary_clusters = np.zeros_like(self.labelled_clustered_img)
+        binary_clusters[self.labelled_clustered_img > 0] = 1 # Pixel values > 0 are set to 1 in the binary image
+        num_cluster_pixels = binary_clusters.sum()
+
+        num_clusters = self.labelled_clustered_img.max()
+        num_seg_pixels = self.seg_img.sum()
+        num_noise_pixels = num_seg_pixels - num_cluster_pixels
+
+        print("Plume Detector block width pixels, min pixels, clusters, num points, cluster points, noise points, clustering time: "
+              "%.2f, %.1f, %d, %d, %d, %d, %.3f "
+              % (self.window_width_pixels, self.cluster_min_pixels, num_clusters, num_seg_pixels, num_cluster_pixels,
+                 num_noise_pixels, self.clustering_time_secs))
 
         return
 
@@ -663,9 +678,9 @@ class PPlumeDetector():
             self.clusters[i].lat = lat
             self.clusters[i].long = long
 
-            print("nav: " + "{:.2f}".format(self.clusters[i].nav_x ) + "," + "{:.2f}".format(self.clusters[i].nav_y))
-            print("local: " + "{:.2f}".format(local_x) + "," + "{:.2f}".format(local_y))
-            print("earth: " + "{:.6f}".format(lat) + "," + "{:.6f}".format(long))
+            #print("nav: " + "{:.2f}".format(self.clusters[i].nav_x ) + "," + "{:.2f}".format(self.clusters[i].nav_y))
+            #print("local: " + "{:.2f}".format(local_x) + "," + "{:.2f}".format(local_y))
+            #print("earth: " + "{:.6f}".format(lat) + "," + "{:.6f}".format(long))
 
         return
 
