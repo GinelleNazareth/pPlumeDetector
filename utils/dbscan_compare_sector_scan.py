@@ -36,7 +36,8 @@ def cluster_dbscan(plume_detector):
     dbscan_img = np.zeros_like(plume_detector.seg_img, dtype=np.uint8)
 
     # From the image, extract the list of points (detections above the threshold)
-    num_points = plume_detector.seg_scan.sum()
+    #num_points = plume_detector.seg_scan.sum()
+    num_points = plume_detector.seg_img.sum()
 
     if num_points == 0:
         return dbscan_img
@@ -52,27 +53,40 @@ def cluster_dbscan(plume_detector):
     circle_to_square_area_ratio = math.pi/4
     cluster_min_pixels = round(plume_detector.cluster_min_pixels*circle_to_square_area_ratio)
     epsilon = plume_detector.window_width_pixels/2
-    print("DBSCAN epsilon: " + str(epsilon) + ", min samples: " + str(cluster_min_pixels))
+    #print("DBSCAN epsilon: " + str(epsilon) + ", min samples: " + str(cluster_min_pixels))
 
     start = time.time()
     db = DBSCAN(eps=epsilon, min_samples=cluster_min_pixels).fit(points)
     end = time.time()
-    print("DBSCAN time is ", end - start)
+    clustering_time = end-start
+    #print("DBSCAN time is ", end - start)
 
     # Number of clusters in labels, ignoring noise if present.
     labels = db.labels_
     n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
     n_noise_ = list(labels).count(-1)
+    num_labels = len(labels)
+    n_cluster_points = num_labels - n_noise_
 
-    print("Estimated number of clusters: %d" % n_clusters_)
-    print("Estimated number of noise points: %d" % n_noise_)
+    #print("Estimated number of clusters: %d" % n_clusters_)
+    #print("Estimated number of noise points: %d" % n_noise_)
+    #print("Estimated number of cluster points: %d" % n_cluster_points)
 
+    print("DBSCAN num points:", num_points)
+    print("DBSCAN epsilon, min samples, clusters, num points, cluster points, noise points, clustering time: "
+          "%.2f, %.1f, %d, %d, %d, %d, %.3f "
+          %(epsilon, cluster_min_pixels, n_clusters_, num_labels, n_cluster_points, n_noise_, clustering_time))
+
+    print("DBSCAN Clusters (x, y, num points)")
     unique_labels = set(labels)
     for k in unique_labels:
 
         class_member_mask = labels == k
-
         class_points = points[class_member_mask]
+        cluster_x = np.mean(class_points[:,0])
+        cluster_y = np.mean(class_points[:,1])
+        print("%.1f, %.1f, %d" %(cluster_x, cluster_y, len(class_points)))
+
         for col, row in class_points:
             # Add 1 since labelling starts at -1, which is noise
             # 'Noise' pixels are then set to 0, and not plotted
@@ -107,7 +121,7 @@ if __name__ == "__main__":
     plume_detector.range_m = range_m
     plume_detector.num_steps = num_steps
     plume_detector.speed_of_sound = speed_of_sound
-    plume_detector.configure()
+    #plume_detector.configure()
     #plume_detector.scan_processing_angles = [399] # Over-write default, which is the start and stop angles
     plume_detector.lat_origin = lat_origin
     plume_detector.long_origin = long_origin
