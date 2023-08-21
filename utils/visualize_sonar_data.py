@@ -104,7 +104,6 @@ if __name__ == "__main__":
             # Call functions to create an image of the scan and cluster it
             plume_detector.seg_img = plume_detector.create_sonar_image(plume_detector.seg_scan_snapshot)
             plume_detector.cluster()
-            plume_detector.calc_cluster_centers()
             plume_detector.get_cluster_center_nav()
             plume_detector.georeference_clusters()
             plume_detector.output_sorted_cluster_centers()
@@ -156,21 +155,15 @@ if __name__ == "__main__":
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
 
-            # 4: Clustered Cores
-            #ax = fig.add_subplot(2, 3, 4)
-            #image = plume_detector.clustered_cores_img.astype(float)
-            #image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
-            #plt.imshow(image, interpolation='none',cmap='RdYlBu')
-            #ax.title.set_text('4: Clustered Cores')
-            #ax.set_xticks(x_label_pos, labels = x_labels)
-            #ax.set_yticks(y_label_pos, labels= y_labels)
-
-            # 3: Labelled Regions
+            # 3: Labelled Clusters
             ax = fig.add_subplot(2, 2, 3)
-            image = plume_detector.labelled_regions_img.astype(float)
+            image = plume_detector.labelled_clustered_img.astype(float)
+            # Increment non-zero pixel values.'1'is used for cluster circles and centers in the output image
+            image = np.where(image > 0, image + 1, image)
             image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
-            plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
-            ax.title.set_text('3: Labelled Regions')
+            #plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
+            plt.imshow(image, interpolation='none', cmap='Dark2', vmin = 1, vmax = 8)
+            ax.title.set_text('3: Labelled Clusters')
             ax.set_xticks(x_label_pos, labels = x_labels)
             ax.set_yticks(y_label_pos, labels= y_labels)
             ax.set_aspect('equal')
@@ -183,8 +176,10 @@ if __name__ == "__main__":
             # 4: Final Output
             ax = fig.add_subplot(2, 2, 4)
             image = plume_detector.output_img.astype(float)
+            image = np.where(image == 1, 8, image)  # Make circles grey
             image[image==0] = np.nan # Set zeroes to nan so that they are not plotted
-            plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
+            #plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
+            plt.imshow(image, interpolation='none', cmap='Dark2', vmin=1, vmax=8)
             ax.title.set_text('4: Labelled Clusters')
             ax.set_xticks(output_x_label_pos, labels = x_labels)
             ax.set_yticks(output_y_label_pos, labels= y_labels)
