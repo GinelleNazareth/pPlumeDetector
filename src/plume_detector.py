@@ -1,16 +1,17 @@
+import os
 import copy
 import time
-import pymoos
 import math
+import pymoos
+import pyproj
 import numpy as np
+import cv2 as cv
 from datetime import datetime
 from brping import PingParser
 from brping import definitions
 from skimage import measure
-import cv2 as cv
+from sklearn.cluster import DBSCAN
 from matplotlib import pyplot as plt
-import os
-import pyproj
 
 # Limitations
 # 1) Processes data as it comes in, regardless of timeouts/power cycles, as
@@ -23,6 +24,7 @@ class Cluster():
         # Cluster radius is the distance from the cluster center to the furthest point from it
         self.radius_pixels = 0
         self.radius_m = 0
+        self.num_points = 0
 
         # Sonar beam angle at cluster center
         self.angle_degs = 0
@@ -50,6 +52,7 @@ class Cluster():
         return {
             "center_row_pixels": self.center_row,
             "center_col_pixels": self.center_col,
+            "num_points": self.num_points,
             "radius_pixels": self.radius_pixels,
             "center_local_x_m": self.local_x,
             "center_local_y_m": self.local_y,
@@ -65,9 +68,9 @@ class PPlumeDetector():
     def __init__(self):
 
         # Algorithm Parameters
-        self.threshold = 0.3 * 255 #0.5 * 255
-        self.window_width_m = 1.0 # Clustering window size
-        self.cluster_min_fill_percent = 30
+        self.threshold = 0.2 * 255 #0.5 * 255
+        self.dbscan_epsilon_m = 1.25
+        self.dbscan_min_fill_percent = 20
         self.noise_range_m = 2 # Range within which data is ignored (usually just noise)
         self.image_width_pixels = 400# Width in pixels of sonar images
         # Distance between the Ping360 and INS center, measured along the vehicle's longitudinal axis
@@ -79,8 +82,9 @@ class PPlumeDetector():
         self.rads_to_grads = 200/np.pi
         self.max_angle_grads = 400
 
-        self.window_width_pixels = None
-        self.cluster_min_pixels = None
+        self.dbscan_epsilon_pixels = None
+        self.dbscan_min_pts = None
+        self.dbscan_output = None
 
         self.comms = pymoos.comms()
 
@@ -110,9 +114,6 @@ class PPlumeDetector():
         self.seg_scan_snapshot = None # Copy of seg scan, taken at start/stop angle
 
         self.seg_img = None           # self.seg_scan warped into an image (re-gridded to cartesian grid)
-        self.clustered_cores_img = None # Image with core cluster pixels (percentage of pixels in surrounding > threshold)
-        self.cluster_regions_img = None # Image wth all pixels in clustering windows set to 1  (used for labelling)
-        self.labelled_regions_img = None # Cluster regions image, with unique label (pixel value) applied to each region
         self.labelled_clustered_img = None # seg_image * labelled_regions_img
         self.clustered_img = None # Black and white version of labelled_clustered_img
         self.output_img = None
@@ -202,7 +203,6 @@ class PPlumeDetector():
                 # Warp data into image with cartesian co-ordinates, then cluster
                 self.seg_img = self.create_sonar_image(self.seg_scan_snapshot)
                 self.cluster()
-                self.calc_cluster_centers()
                 self.get_cluster_center_nav()
                 self.georeference_clusters()
                 self.output_sorted_cluster_centers()
@@ -492,108 +492,82 @@ class PPlumeDetector():
         return warped_image
 
     def cluster(self):
-        '''Applies a square window clustering method to self.seg_img, and stores the image with the labelled clustered
-        pixels as labelled_clustered_img'''
+        '''Runs DBSCAN clustering on self.seg_img, and stores the clustering output in self.dbscan_output. Also
+        calculates the cluster centers and radii, and saves them in the clusters data structure. An image
+        representation of the DBSCAN output is saved in self.labelled_clustered_img.'''
 
         # Reset class vars
         self.num_clusters = 0
         self.clusters = []
+        self.labelled_clustered_img = np.zeros_like(self.seg_img, dtype=np.uint8)
 
-        start = time.time()
+        # Return if there are no segmented points
+        n_points = self.seg_img.sum()
+        if n_points == 0:
+            return
 
-        # Convert window width from meters to pixels
-        image_width_pixels = self.seg_img.shape[1] # Assumes square image
-        self.window_width_pixels = self.window_width_m * image_width_pixels / (2 * self.range_m)
-        self.window_width_pixels = 2*math.floor(self.window_width_pixels/2) + 1 # Window size should be an odd number
-
-        # Ensure widow width is at least 3 pixels
-        if self.window_width_pixels < 3:
-            print('Clipping clustering block with to 3 pixels (minimum)')
-            self.window_width_pixels = 3
-        self.comms.notify('PLUME_DETECTOR_CLUSTERING_BLOCK_WIDTH', self.window_width_pixels, pymoos.time())
-
-        # Convert minimum fill from percentage to pixels
-        window_rows = self.window_width_pixels
-        window_cols = self.window_width_pixels
-        area = window_rows*window_cols
-        self.cluster_min_pixels = self.cluster_min_fill_percent*area/100
-
-        # Add border padding to image
-        row_padding = math.floor(window_rows / 2)
-        col_padding = math.floor(window_cols / 2)
-        self.seg_img = cv.copyMakeBorder(self.seg_img, row_padding, row_padding, col_padding, col_padding,
-                                         cv.BORDER_CONSTANT, None, value=0)
-
-        # Initialize image matrices
-        rows = self.seg_img.shape[0]
-        cols = self.seg_img.shape[1]
-        self.clustered_cores_img = np.zeros((rows, cols), dtype=np.uint8)
-        self.cluster_regions_img = np.zeros((rows, cols), dtype=np.uint8)
-        self.labelled_clustered_img = np.zeros((rows, cols), dtype=np.uint8)
-        window_ones = np.ones((int(window_rows), int(window_cols)), dtype=np.uint8)
-
-        # Create clustered_cores_img, identifying pixels at the center of high density windows.
-        # Also create cluster_regions_img, identifying high density regions. Note: output matrices are zero padded
-        for row in range(row_padding, rows-row_padding, 1):
-            for col in range(col_padding, cols-col_padding, 1):
+        # List the coordinates of the segmented points (detections above the threshold)
+        points = np.zeros(shape=(n_points, 2))
+        index = 0
+        for row in range(self.seg_img.shape[0]):
+            for col in range(self.seg_img.shape[1]):
                 if self.seg_img[row, col]:
-                    start_row = row - row_padding
-                    end_row   = row + row_padding + 1
-                    start_col = col - col_padding
-                    end_col   = col + col_padding + 1
-                    filled = (self.seg_img[start_row:end_row, start_col:end_col]).sum()
-                    if filled > self.cluster_min_pixels:
-                        self.clustered_cores_img[row,col] = 1
-                        self.cluster_regions_img[start_row:end_row, start_col:end_col] = window_ones
+                    points[index] = [col, row]
+                    index = index + 1
 
-        # Identify and label separate regions
-        self.labelled_regions_img, self.num_clusters = measure.label(self.cluster_regions_img, return_num=True, connectivity=2)
+        # Compute DBSCAN epsilon parameter value, in pixels
+        image_width_pixels = self.seg_img.shape[1]  # Assumes square image
+        self.dbscan_epsilon_pixels = self.dbscan_epsilon_m * image_width_pixels / (2 * self.range_m)
+        if self.dbscan_epsilon_pixels < 1.5:
+            print('Clipping DBSCAN epsilon to 1.5 pixels (minimum)')
+            self.dbscan_epsilon_pixels = 1.5
+        self.comms.notify('PLUME_DETECTOR_DBSCAN_EPSILON_PIXELS', self.dbscan_epsilon_pixels, pymoos.time())
 
-        # Mask input image with the labelled regions image to create the labelled clustered image
-        self.labelled_clustered_img = self.labelled_regions_img * self.seg_img
+        # Compute DBSCAN minimum points parameter value
+        area = math.pi * (self.dbscan_epsilon_pixels**2)
+        self.dbscan_min_pts = round(self.dbscan_min_fill_percent*area/100)
 
-        # Save clustering time
-        end = time.time()
-        self.clustering_time_secs = end - start
-        #print("Plume Detector Clustering time is ", self.clustering_time_secs)
-        self.comms.notify('PLUME_DETECTOR_CLUSTERING_TIME_SECS', self.clustering_time_secs, pymoos.time())
+        # Run DBSCAN clustering
+        start = time.time()
+        try:
+            self.dbscan_output = DBSCAN(eps=self.dbscan_epsilon_pixels, min_samples=self.dbscan_min_pts).fit(points)
+        except Exception as e:
+            print("DBSCAN error: ", e)
+            return
+        clustering_time = time.time() - start
+        print("DBSCAN clustering time: %.3f secs" % clustering_time )
 
-        # Compute number of cluster pixels
-        binary_clusters = np.zeros_like(self.labelled_clustered_img)
-        binary_clusters[self.labelled_clustered_img > 0] = 1 # Pixel values > 0 are set to 1 in the binary image
-        num_cluster_pixels = binary_clusters.sum()
+        # Calculate number of clusters, ignoring noise (labelled as '-1') if present.
+        labels = self.dbscan_output.labels_
+        self.num_clusters = len(set(labels)) - (1 if -1 in labels else 0)
 
-        num_clusters = self.labelled_clustered_img.max()
-        num_seg_pixels = self.seg_img.sum()
-        num_noise_pixels = num_seg_pixels - num_cluster_pixels
+        # Calculate number of cluster points and noise points
+        n_noise_points = list(labels).count(-1)
+        n_cluster_points = n_points - n_noise_points
 
-        print("Plume Detector block width pixels, min pixels, clusters, num points, cluster points, noise points, clustering time: "
-              "%.2f, %.1f, %d, %d, %d, %d, %.3f "
-              % (self.window_width_pixels, self.cluster_min_pixels, num_clusters, num_seg_pixels, num_cluster_pixels,
-                 num_noise_pixels, self.clustering_time_secs))
+        print("DBSCAN epsilon, min samples: %.1f, %.1f" % (self.dbscan_epsilon_pixels, self.dbscan_min_pts))
+        print("DBSCAN num points, num clusters: %d, %d" % (n_points, self.num_clusters))
+        print("DBSCAN num cluster points, num noise points: %d, %d" % (n_cluster_points, n_noise_points))
 
-        return
-
-    def calc_cluster_centers(self):
-        '''Calculates the cluster centers and radii, and draws them on the output image'''
-
+        # Create the labelled_clustered_img, and calculate the cluster centers and radii
         self.clusters = [Cluster() for i in range(self.num_clusters)]
-
-        # Calculate cluster centers and radii
         for cluster_idx in np.arange(self.num_clusters):
 
-            # Get indices of cluster pixels.
-            indices = np.nonzero(self.labelled_clustered_img == (cluster_idx+1))
+            # Calculate cluster center
+            cluster_member_mask = labels == cluster_idx
+            cluster_points = points[cluster_member_mask]
+            center_col = np.mean(cluster_points[:, 0])
+            center_row = np.mean(cluster_points[:, 1])
+            center = np.array([center_col, center_row])
 
-            # Calculate center coordinates
-            center_row = indices[0].mean()
-            center_col = indices[1].mean()
-
-            # Find furthest point & calculate cluster radius
+            # Update the labelled clustered image with the current cluster's pixel labels & compute the cluster radius
             radius = 0
-            center = np.array([center_row, center_col])
-            for i in range(len(indices[0])):
-                point = np.array([indices[0][i], indices[1][i]])
+            for point in cluster_points:
+
+                # Label corresponding pixel in the labelled clustered image. Add 1 since cluster indexing starts at 0.
+                self.labelled_clustered_img[int(point[1]), int(point[0])] = cluster_idx + 1
+
+                # Find point furthest from center to determine the cluster radius
                 dist = np.linalg.norm(point - center)
                 if dist > radius:
                     radius = dist
@@ -602,6 +576,7 @@ class PPlumeDetector():
             self.clusters[cluster_idx].center_row = center_row
             self.clusters[cluster_idx].center_col = center_col
             self.clusters[cluster_idx].radius_pixels = radius
+            self.clusters[cluster_idx].num_points = len(cluster_points)
 
         return
 
@@ -746,13 +721,7 @@ class PPlumeDetector():
         filename = "Scan_" + str(self.num_scans) + "_Im2_Segmented_Warped.png"
         cv.imwrite(os.path.join(dir, filename), self.seg_img)
 
-        filename = "Scan_" + str(self.num_scans) + "_Img3_ClusteredCores.png"
-        cv.imwrite(os.path.join(dir, filename), self.clustered_cores_img)
-
-        filename = "Scan_" + str(self.num_scans) + "_Img4_LabelledRegions.png"
-        cv.imwrite(os.path.join(dir, filename), self.labelled_regions_img)
-
-        filename = "Scan_" + str(self.num_scans) + "_Img5_Clustered.png"
+        filename = "Scan_" + str(self.num_scans) + "_Img3_Clustered.png"
         cv.imwrite(os.path.join(dir, filename), self.labelled_clustered_img)
 
         ## Increase image contrast and save
@@ -764,12 +733,6 @@ class PPlumeDetector():
 
         filename = "Scan_" + str(self.num_scans) + "_Img2_Segmented.png"
         cv.imwrite(os.path.join(dir, filename), 255*self.seg_img)
-
-        filename = "Scan_" + str(self.num_scans) + "_Img3_ClusteredCores.png"
-        cv.imwrite(os.path.join(dir, filename), 255*self.clustered_cores_img)
-
-        filename = "Scan_" + str(self.num_scans) + "_Img4_ClusterRegions.png"
-        cv.imwrite(os.path.join(dir, filename), 255*self.cluster_regions_img)
 
         # Convert labelled clustered image to a black and white image
         filename = "Scan_" + str(self.num_scans) + "_Img5_Clustered.png"
@@ -826,127 +789,6 @@ class PPlumeDetector():
             # Add circle encompassing the cluster
             circle_radius = round(radius*scale + scale/2)
             self.output_img = cv.circle(self.output_img, circle_center, circle_radius,1, 2, cv.LINE_8)
-
-
-    def create_plots(self):
-
-        range_m_int = round(self.range_m)
-
-        # Create warped (polar) images
-        warped = self.create_sonar_image(self.scan_intensities)
-        #denoised_warped = self.create_sonar_image(self.scan_intensities_denoised)
-
-        ### Plot Clustering Steps ###
-        fig = plt.figure("Clustering Steps")
-        #plt.subplots(2,2,layout="constrained")
-        suptitle = 'Scan ' + str(self.num_scans) + ', ' + str(self.num_clusters) + ' Cluster(s)'
-        plt.suptitle(suptitle)
-        #plt.title(self.cluster_centers_string)
-        plt.axis('off')
-
-        # Labels and label positions for warped images
-        rows, cols = warped.shape[0], warped.shape[1]
-        x_label_pos = [0, 0.25 * cols, 0.5 * cols, 0.75 * cols, cols]
-        x_labels = [str(range_m_int), str(0.5 * range_m_int), '0', str(0.5 * range_m_int), str(range_m_int)]
-        y_label_pos = [0, 0.25 * rows, 0.5 * rows, 0.75 * rows, rows]
-        y_labels = [str(range_m_int), str(0.5 * range_m_int), '0', str(0.5 * range_m_int), str(range_m_int)]
-
-        # 1: Original data, warped
-        ax = fig.add_subplot(2, 2, 1)
-        plt.imshow(warped, interpolation='none', cmap='jet',vmin=0,vmax=255)
-        ax.title.set_text('1: Original')
-        ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
-        ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
-
-        # 2: Denoised data
-        #ax = fig.add_subplot(2, 3, 2)
-        #plt.imshow(denoised_warped, interpolation='none', cmap='jet',vmin=0,vmax=255)
-        #ax.title.set_text('2: Denoised')
-        #ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
-        #ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
-
-        # 2: Segmented data
-        ax = fig.add_subplot(2, 2, 2)
-        image = self.seg_img.astype(float)
-        image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
-        plt.imshow(image, interpolation='none', cmap='RdYlBu')
-        ax.title.set_text('3: Segmented')
-        ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
-        ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
-
-        # 4: Clustered Cores
-        #ax = fig.add_subplot(2, 3, 4)
-        #image = self.clustered_cores_img.astype(float)
-        #image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
-        #plt.imshow(image, interpolation='none', cmap='RdYlBu')
-        #ax.title.set_text('4: Clustered Cores')
-        #ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
-        #ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
-
-        # 3: Labelled Regions
-        ax = fig.add_subplot(2, 2, 3)
-        image = self.labelled_regions_img.astype(float)
-        image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
-        plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
-        ax.title.set_text('5: Labelled Regions')
-        ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
-        ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
-        ax.set_aspect('equal')
-
-        # Label positions for output images - different because images are larger
-        rows, cols = plume_detector.output_img.shape[0], plume_detector.output_img.shape[1]
-        output_x_label_pos = [0, 0.25 * cols, 0.5 * cols, 0.75 * cols, cols]
-        output_y_label_pos = [0, 0.25 * rows, 0.5 * rows, 0.75 * rows, rows]
-
-        # 6: Final Output
-        ax = fig.add_subplot(2, 2, 4)
-        image = self.output_img.astype(float)
-        image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
-        plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
-        ax.title.set_text('6: Labelled Clusters')
-        ax.set_xticks(output_x_label_pos), ax.set_xticklabels(x_labels)
-        ax.set_yticks(output_y_label_pos), ax.set_yticklabels(y_labels)
-        ax.set_aspect('equal')
-
-        #fig.tight_layout()
-        plt.subplot_tool()
-        plt.show()
-        image_name = "Clustering_Steps_Scan_" + str(self.num_scans)
-        plt.savefig(os.path.join(self.data_save_path, image_name), dpi=400)
-        #plt.clf()
-
-        # ### Plot Clustering Overview ###
-        # fig = plt.figure()
-        # plt.suptitle('Scan ' + str(self.num_scans))
-        # plt.title(str(self.num_clusters) + ' Cluster(s)')
-        # plt.axis('off')
-        #
-        # # 1: Original data, warped
-        # ax = fig.add_subplot(1, 2, 1)
-        # plt.imshow(warped, interpolation='none', cmap='jet',vmin=0,vmax=255)
-        # ax.title.set_text('Original')
-        # ax.set_xticks(x_label_pos), ax.set_xticklabels(x_labels)
-        # ax.set_yticks(y_label_pos), ax.set_yticklabels(y_labels)
-        #
-        # # 2: Plot clusters if num clusters > 0
-        # if self.num_clusters > 0:
-        #     ax = fig.add_subplot(1, 2, 2)
-        #     image = self.output_img.astype(float)
-        #     image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
-        #     plt.imshow(image, interpolation='none', cmap='nipy_spectral', vmin=0)
-        #     ax.title.set_text('Labelled Clusters')
-        #     ax.set_xticks(output_x_label_pos), ax.set_xticklabels(x_labels)
-        #     ax.set_yticks(output_y_label_pos), ax.set_yticklabels(y_labels)
-        #     ax.set_aspect('equal')
-        #
-        # fig.tight_layout()
-        #
-        # # plt.show()
-        # image_name = "Clustering_Overview_Scan_" + str(self.num_scans)
-        # plt.savefig(os.path.join(self.data_save_path, image_name), dpi=400)
-        # plt.close(fig)
-
-
 
 
 if __name__ == "__main__":
