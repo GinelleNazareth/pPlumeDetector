@@ -212,7 +212,7 @@ class PPlumeDetector():
                 # Calculate and output the total processing time
                 end_time = time.time()
                 self.total_processing_time_secs = end_time - start_time
-                print_str = "Scan %d: Processing time is %.3f secs".format(self.num_scans,
+                print_str = "Scan {}: Processing time is {:.3f} secs".format(self.num_scans,
                                                                            self.total_processing_time_secs)
                 print(print_str)
                 self.comms.notify('PLUME_DETECTOR_TOTAL_PROCESSING_TIME_SECS', self.total_processing_time_secs,
