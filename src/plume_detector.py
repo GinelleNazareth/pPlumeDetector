@@ -9,6 +9,7 @@ import cv2 as cv
 from datetime import datetime
 from brping import PingParser
 from brping import definitions
+from collections import OrderedDict
 from skimage import measure
 from sklearn.cluster import DBSCAN
 from matplotlib import pyplot as plt
@@ -49,20 +50,20 @@ class Cluster():
         self.long = 0
 
     def serialize(self):
-        return {
-            "center_row_pixels": self.center_row,
-            "center_col_pixels": self.center_col,
-            "num_points": self.num_points,
-            "radius_pixels": self.radius_pixels,
-            "center_local_x_m": self.local_x,
-            "center_local_y_m": self.local_y,
-            "radius_m": self.radius_m,
-            "center_lat": self.lat,
-            "center_long": self.long,
-            "nav_x_m": self.nav_x,
-            "nav_y_m": self.nav_y,
-            "nav_heading_deg": self.nav_heading
-        }
+        return OrderedDict([
+            ("center_row_pixels", self.center_row),
+            ("center_col_pixels", self.center_col),
+            ("num_points", self.num_points),
+            ("radius_pixels", self.radius_pixels),
+            ("center_local_x_m", self.local_x),
+            ("center_local_y_m", self.local_y),
+            ("radius_m", self.radius_m),
+            ("center_lat", self.lat),
+            ("center_long", self.long),
+            ("nav_x_m", self.nav_x),
+            ("nav_y_m", self.nav_y),
+            ("nav_heading_deg", self.nav_heading)
+        ])
 
 class PPlumeDetector():
     def __init__(self):
@@ -211,8 +212,8 @@ class PPlumeDetector():
                 # Calculate and output the total processing time
                 end_time = time.time()
                 self.total_processing_time_secs = end_time - start_time
-                print_str = 'Scan ' + str(self.num_scans) + ": Processing time is " + \
-                            str(self.total_processing_time_secs) + " secs"
+                print_str = "Scan %d: Processing time is %.3f secs".format(self.num_scans,
+                                                                           self.total_processing_time_secs)
                 print(print_str)
                 self.comms.notify('PLUME_DETECTOR_TOTAL_PROCESSING_TIME_SECS', self.total_processing_time_secs,
                                   pymoos.time())
@@ -499,6 +500,7 @@ class PPlumeDetector():
         # Reset class vars
         self.num_clusters = 0
         self.clusters = []
+        self.clustering_time_secs = 0
         self.labelled_clustered_img = np.zeros_like(self.seg_img, dtype=np.uint8)
 
         # Return if there are no segmented points
@@ -534,8 +536,8 @@ class PPlumeDetector():
         except Exception as e:
             print("DBSCAN error: ", e)
             return
-        clustering_time = time.time() - start
-        print("DBSCAN clustering time: %.3f secs" % clustering_time )
+        self.clustering_time_secs = time.time() - start
+        print("DBSCAN clustering time: %.3f secs" % self.clustering_time_secs )
 
         # Calculate number of clusters, ignoring noise (labelled as '-1') if present.
         labels = self.dbscan_output.labels_
@@ -753,8 +755,8 @@ class PPlumeDetector():
             date_time = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
             file.write("Timestamp: " + date_time + "\n")
             file.write("Num Clusters: " + str(self.num_clusters) + "\n")
-            file.write("Total processing time: " + str(self.total_processing_time_secs) + " secs\n")
-            file.write("Clustering time: " + str(self.clustering_time_secs) + " secs\n\n")
+            file.write("Total processing time: {:.3f} secs\n".format(self.total_processing_time_secs))
+            file.write("Clustering time: {:.3f} secs\n\n".format(self.clustering_time_secs))
 
             # Write data for each cluster
             for i in np.arange(self.num_clusters):
