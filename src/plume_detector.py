@@ -1,4 +1,5 @@
 import os
+import csv
 import copy
 import time
 import math
@@ -13,6 +14,7 @@ from collections import OrderedDict
 from skimage import measure
 from sklearn.cluster import DBSCAN
 from matplotlib import pyplot as plt
+from sklearn.metrics import pairwise_distances
 
 # Limitations
 # 1) Processes data as it comes in, regardless of timeouts/power cycles, as
@@ -69,10 +71,11 @@ class PPlumeDetector():
     def __init__(self):
 
         # Algorithm Parameters
-        self.threshold = 0.2 * 255 #0.5 * 255
-        self.dbscan_epsilon_m = 1.25
-        self.dbscan_min_fill_percent = 20
-        self.noise_range_m = 2 # Range within which data is ignored (usually just noise)
+        self.threshold = 0.1 * 255 #0.1 * 255 #0.25 * 255
+        #self.dbscan_epsilon_m = 0.501#0.707#0.2 #0.75
+        self.window_width_m = 3.0 #1.0
+        self.dbscan_min_fill_percent = 1 #30
+        self.noise_range_m = 0.5 #2 # Range within which data is ignored (usually just noise)
         self.image_width_pixels = 400# Width in pixels of sonar images
         # Distance between the Ping360 and INS center, measured along the vehicle's longitudinal axis
         self.instrument_offset_x_m = 3
@@ -124,10 +127,14 @@ class PPlumeDetector():
         self.first_scan = True
         self.clustering_pending = False
 
+        # Cluster information for the clusters detected in the current scan
         self.num_clusters = 0
         self.clusters = [] # List of Cluster data structures
         self.sorted_clusters = [] # List of Cluster data structures, sorted based on cluster radius (largest to smallest)
         self.cluster_centers_string = ""
+
+        # Cluster information of clusters detected since the start
+        self.cluster_centers = []
 
         self.clustering_time_secs = None
         self.total_processing_time_secs = None
@@ -241,6 +248,7 @@ class PPlumeDetector():
         success = success and self.comms.register('NAV_HEADING', 0)
         success = success and self.comms.register('LAT_ORIGIN', 0)
         success = success and self.comms.register('LONG_ORIGIN', 0)
+        success = success and self.comms.register('PLUME_DETECTOR_CSV_WRITE_CMD', 0)
 
         if success:
             self.set_state('DB_CONNECTED')
@@ -351,6 +359,9 @@ class PPlumeDetector():
                 self.lat_origin = val
             elif name == 'LONG_ORIGIN':
                 self.long_origin = val
+            elif name == 'PLUME_DETECTOR_CSV_WRITE_CMD':
+                if val == 1:
+                    self.write_cluster_centers_csv()
 
         return
 
@@ -518,21 +529,40 @@ class PPlumeDetector():
                     index = index + 1
 
         # Compute DBSCAN epsilon parameter value, in pixels
-        image_width_pixels = self.seg_img.shape[1]  # Assumes square image
-        self.dbscan_epsilon_pixels = self.dbscan_epsilon_m * image_width_pixels / (2 * self.range_m)
-        if self.dbscan_epsilon_pixels < 1.5:
-            print('Clipping DBSCAN epsilon to 1.5 pixels (minimum)')
-            self.dbscan_epsilon_pixels = 1.5
+        # image_width_pixels = self.seg_img.shape[1]  # Assumes square image
+        # self.dbscan_epsilon_pixels = self.dbscan_epsilon_m * image_width_pixels / (2 * self.range_m)
+        # self.dbscan_epsilon_pixels = 2.51
+        # if self.dbscan_epsilon_pixels < 1.5:
+        #     print('Clipping DBSCAN epsilon to 1.5 pixels (minimum)')
+        #     self.dbscan_epsilon_pixels = 1.5
+
+        # Convert window width from meters to pixels
+        image_width_pixels = self.seg_img.shape[1] # Assumes square image
+        self.window_width_pixels = self.window_width_m * image_width_pixels / (2 * self.range_m)
+        self.window_width_pixels = 2*math.floor(self.window_width_pixels/2) + 1 # Window size should be an odd number
+
+        # Ensure widow width is at least 3 pixels
+        if self.window_width_pixels < 3:
+            print('Clipping clustering block with to 3 pixels (minimum)')
+            self.window_width_pixels = 3
+
+        self.dbscan_epsilon_pixels = self.window_width_pixels/2
+        #self.dbscan_epsilon_pixels = self.window_width_pixels / math.sqrt(2)
         self.comms.notify('PLUME_DETECTOR_DBSCAN_EPSILON_PIXELS', self.dbscan_epsilon_pixels, pymoos.time())
 
         # Compute DBSCAN minimum points parameter value
-        area = math.pi * (self.dbscan_epsilon_pixels**2)
+        #area = math.pi * (self.dbscan_epsilon_pixels**2)
+        area = (2*self.dbscan_epsilon_pixels)**2
         self.dbscan_min_pts = round(self.dbscan_min_fill_percent*area/100)
+
+
+        #self.dbscan_min_pts = 8
 
         # Run DBSCAN clustering
         start = time.time()
         try:
-            self.dbscan_output = DBSCAN(eps=self.dbscan_epsilon_pixels, min_samples=self.dbscan_min_pts).fit(points)
+            #self.dbscan_output = DBSCAN(eps=self.dbscan_epsilon_pixels, min_samples=self.dbscan_min_pts).fit(points)
+            self.dbscan_output = DBSCAN(eps=self.dbscan_epsilon_pixels, min_samples=self.dbscan_min_pts, metric='chebyshev').fit(points)
         except Exception as e:
             print("DBSCAN error: ", e)
             return
@@ -654,6 +684,8 @@ class PPlumeDetector():
             self.clusters[i].local_y = local_y
             self.clusters[i].lat = lat
             self.clusters[i].long = long
+
+            self.cluster_centers.append((local_x,local_y,self.clusters[i].nav_x,self.clusters[i].nav_y))
 
             #print("nav: " + "{:.2f}".format(self.clusters[i].nav_x ) + "," + "{:.2f}".format(self.clusters[i].nav_y))
             #print("local: " + "{:.2f}".format(local_x) + "," + "{:.2f}".format(local_y))
@@ -791,6 +823,20 @@ class PPlumeDetector():
             # Add circle encompassing the cluster
             circle_radius = round(radius*scale + scale/2)
             self.output_img = cv.circle(self.output_img, circle_center, circle_radius,1, 2, cv.LINE_8)
+
+    def write_cluster_centers_csv(self):
+        '''Writes the cluster center positions and AUV position at the time of detection to a csv file. All positions
+        are in local coordinates'''
+
+        csv_file_name = "cluster_centers.csv"
+
+        with open(csv_file_name, 'w', newline='') as csv_file:
+            csv_writer = csv.writer(csv_file)
+
+            # Write a header row
+            csv_writer.writerow(['Cluster Center X', 'Cluster Center Y', 'AUV Nav X', 'AUV Nav Y'])
+            csv_writer.writerows(self.cluster_centers)
+
 
 
 if __name__ == "__main__":
