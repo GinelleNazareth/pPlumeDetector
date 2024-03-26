@@ -8,6 +8,7 @@ import time
 import os
 import re
 from matplotlib import rcParams
+import csv
 
 # To use script, set file name and ensure that script parameters match sonar data
 
@@ -17,24 +18,64 @@ rcParams['font.family'] = 'serif'
 # ping360_20210901_123108.bin
 # ping360_20230131_175845.bin - AUV data (saw bottom?)
 
-# Script settings
-#start_time = "00:00:00.000"
 #start_time = "18:12:30.000"
-start_time = "18:30:00.000"
+#start_time = "18:30:00.000"
 #start_time = "18:16:00.000"
 
 #start_time = "00:00:30.000"
-#start_time = "00:10:00.000"
+start_time = "00:10:00.000"
 
 # Script parameters
-start_angle_grads = 33
-stop_angle_grads = 167
+# start_angle_grads = 33
+# stop_angle_grads = 167
+# num_samples = 1200
+# range_m = 50
+# num_steps = 1
+# speed_of_sound = 1500
+# lat_origin = 47.389271
+# long_origin = -53.134431
+
+# Script parameters
+start_angle_grads = 120
+stop_angle_grads = 280
 num_samples = 1200
-range_m = 50
+range_m = 5
 num_steps = 1
 speed_of_sound = 1500
-lat_origin = 47.389271
-long_origin = -53.134431
+lat_origin = 71.376350
+long_origin = -70.076860
+
+# Baffin data files
+#ping360_20230914_161057_dive1.bin
+#ping360_20230914_165855_dive2.bin
+#ping360_20230914_192204_dive3.bin
+#ping360_20230915_123753_dive1.bin
+#ping360_20230915_135657_dive2.bin
+#ping360_20230915_163658_dive3.bin
+#ping360_20230915_174350_dive4.bin
+#ping360_20230915_181058_dive5.bin
+#ping360_20230915_181658_dive6.bin
+#ping360_20230915_183112_dive7.bin
+#ping360_20230915_183952_dive8.bin
+#ping360_20230915_194741_dive9.bin
+#ping360_20230916_130117_dive3.bin
+#ping360_20230916_131845_dive4.bin
+#ping360_20230916_134647_dive5.bin
+#ping360_20230916_173640_dive7.bin
+#ping360_20230917_172804_dive1.bin
+#ping360_20230917_173927_dive2.bin
+#ping360_20230917_175546_dive3.bin
+#ping360_20230917_191702_dive4.bin
+#ping360_20230917_195638_dive5.bin
+#ping360_20230917_211400_dive6.bin
+#ping360_20230918_162410_dive1.bin
+#ping360_20230918_190244_dive2.bin
+
+
+# Script settings
+#start_time = "00:00:00.000"
+#start_time = "17:05:30.000"
+
 
 if __name__ == "__main__":
 
@@ -92,14 +133,26 @@ if __name__ == "__main__":
 
         # Extract ping data from message & feed in to plume detector
         angle = decoded_message.angle
+        #if angle >= start_angle_grads and angle <= stop_angle_grads:
         ping_intensities = np.frombuffer(decoded_message.data,
-                                    dtype=np.uint8)  # Convert intensity data bytearray to numpy array
+                                            dtype=np.uint8)  # Convert intensity data bytearray to numpy array
         plume_detector.binary_device_data_msg = bytes(decoded_message.pack_msg_data())
         plume_detector.process_ping_data()
 
         # Display data at the end of each sector scan
-        #if angle == 399:
-        if angle == start_angle_grads or angle == stop_angle_grads:
+        if angle == 399:
+        #if angle == start_angle_grads or angle == stop_angle_grads:
+
+            scan_num += 1
+            print('Scan:', scan_num)
+            print('Last timestamp', timestamp)
+            range_m_int = round(range_m)
+            print('Range: ', range)
+
+            if scan_num < 2:
+                continue
+            elif scan_num > 2:
+                exit()
 
             # Call functions to create an image of the scan and cluster it
             plume_detector.seg_img = plume_detector.create_sonar_image(plume_detector.seg_scan_snapshot)
@@ -109,11 +162,13 @@ if __name__ == "__main__":
             plume_detector.output_sorted_cluster_centers()
             plume_detector.create_output_image()
 
-            scan_num += 1
-            print('Scan:', scan_num)
-            print('Last timestamp',timestamp)
-            range_m_int = round(range_m)
-            print('Range: ', range)
+            # Open the file in append mode
+            with open('computation_time.csv', 'a', newline='') as csvfile:
+                writer = csv.writer(csvfile, delimiter=',')
+
+                # Write the new data
+                writer.writerow([plume_detector.window_width_pixels, plume_detector.labelled_clustered_img.max(),
+                                 plume_detector.clustering_time_secs])
 
             # Create warped (polar) images
             warped = plume_detector.create_sonar_image(plume_detector.scan_intensities)
@@ -229,5 +284,7 @@ if __name__ == "__main__":
             plt.savefig(os.path.join(img_save_path, image_name), dpi=400)
             plt.close(fig)
 
+            if scan_num == 80:
+                break
 
             start_timestamp = ""
