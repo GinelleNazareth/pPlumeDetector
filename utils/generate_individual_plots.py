@@ -24,21 +24,31 @@ rcParams['font.family'] = 'serif'
 # Script settings
 # start_time = "00:00:00.000"
 # start_time = "18:12:30.000"
-start_time = "18:31:00.000"
+#start_time = "18:31:00.000" # Start of major detections
 # start_time = "18:16:00.000"
 
 # start_time = "00:00:30.000"
-# start_time = "00:10:00.000"
+start_time = "00:10:00.000" # For JH data
 
 # Script parameters
-start_angle_grads = 33
-stop_angle_grads = 167
+# start_angle_grads = 33
+# stop_angle_grads = 167
+# num_samples = 1200
+# range_m = 50
+# num_steps = 1
+# speed_of_sound = 1500
+# lat_origin = 47.389271
+# long_origin = -53.134431
+
+# For JH data
+start_angle_grads = 120
+stop_angle_grads = 280
 num_samples = 1200
-range_m = 50
+range_m = 5
 num_steps = 1
 speed_of_sound = 1500
-lat_origin = 47.389271
-long_origin = -53.134431
+lat_origin = 71.376350
+long_origin = -70.076860
 
 
 def create_sonar_image(sector_intensities, image_width_pixels):
@@ -160,12 +170,11 @@ if __name__ == "__main__":
         plume_detector.process_ping_data()
 
         # Display data at the end of each sector scan
-        # if angle == 399:
-        if angle == start_angle_grads or angle == stop_angle_grads:
+        if angle == 399: #For JH data
+        #if angle == start_angle_grads or angle == stop_angle_grads:
             # Call functions to create an image of the scan and cluster it
             plume_detector.seg_img = plume_detector.create_sonar_image(plume_detector.seg_scan_snapshot)
             plume_detector.cluster()
-            plume_detector.calc_cluster_centers()
             plume_detector.get_cluster_center_nav()
             plume_detector.georeference_clusters()
             plume_detector.output_sorted_cluster_centers()
@@ -240,36 +249,36 @@ if __name__ == "__main__":
             ax.axis('off')
 
             # 5: Cluster Regions
-            image = plume_detector.cluster_regions_img.astype(float)
-            image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
-            ax.imshow(image, interpolation='none', cmap='RdYlBu')
-            image_name = "Scan_" + str(scan_num) + "_Image_5_Cluster_Regions"
-            plt.savefig(os.path.join(img_save_path, image_name), dpi=400)
+            #image = plume_detector.cluster_regions_img.astype(float)
+            #image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
+            #ax.imshow(image, interpolation='none', cmap='RdYlBu')
+            #image_name = "Scan_" + str(scan_num) + "_Image_5_Cluster_Regions"
+            #plt.savefig(os.path.join(img_save_path, image_name), dpi=400)
 
             # Reset plot and axes
-            plt.clf()
-            ax.cla()
-            axes_coords = [0, 0, 1, 1]  # plotting full width and height
-            ax = fig.add_axes(axes_coords)
-            ax.axis('off')
+            #plt.clf()
+            #ax.cla()
+            #axes_coords = [0, 0, 1, 1]  # plotting full width and height
+            #ax = fig.add_axes(axes_coords)
+            #ax.axis('off')
 
             # 6: Labelled Regions
-            image = plume_detector.labelled_regions_img.astype(float)
+            #image = plume_detector.labelled_regions_img.astype(float)
             # Increment non-zero pixel values.'1'is used for cluster circles and centers in the output image
-            image = np.where(image > 0, image + 1, image)
-            image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
-            ax.imshow(image, interpolation='none', cmap='Dark2', vmin=1, vmax=8)
-            image_name = "Scan_" + str(scan_num) + "_Image_6_Labelled_Regions"
-            plt.savefig(os.path.join(img_save_path, image_name), dpi=400)
+            #image = np.where(image > 0, image + 1, image)
+            #image[image == 0] = np.nan  # Set zeroes to nan so that they are not plotted
+            #ax.imshow(image, interpolation='none', cmap='Dark2', vmin=1, vmax=8)
+            #image_name = "Scan_" + str(scan_num) + "_Image_6_Labelled_Regions"
+            #plt.savefig(os.path.join(img_save_path, image_name), dpi=400)
 
             # Reset plot and axes
-            plt.clf()
-            ax.cla()
-            axes_coords = [0, 0, 1, 1]  # plotting full width and height
-            ax = fig.add_axes(axes_coords)
-            ax.axis('off')
+            #plt.clf()
+            #ax.cla()
+            #axes_coords = [0, 0, 1, 1]  # plotting full width and height
+            #ax = fig.add_axes(axes_coords)
+            #ax.axis('off')
 
-            # 7: Labelled Regions
+            # 7: Labelled Clusters
             image = plume_detector.labelled_clustered_img.astype(float)
             # Increment non-zero pixel values.'1'is used for cluster circles and centers in the output image
             image = np.where(image > 0, image + 1, image)
