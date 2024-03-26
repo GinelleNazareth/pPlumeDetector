@@ -5,6 +5,7 @@
 # Ping360 params are currently hard-coded
 
 from decode_sensor_binary import PingViewerLogReader
+from matplotlib import pyplot as plt
 from argparse import ArgumentParser
 from datetime import datetime
 import numpy as np
@@ -16,8 +17,8 @@ import re
 # ping360_20210901_123108.bin
 
 # Script settings
-start_time = "00:00:30.000"
-#start_time = "00:10:00.000"
+#start_time = "00:00:30.000"
+start_time = "00:10:00.000"
 
 def on_connect():
     # Do nothing - no events to register for
@@ -76,5 +77,20 @@ if __name__ == "__main__":
                                     dtype=np.uint8)  # Convert intensity data bytearray to numpy array
         binary_device_data_msg = bytes(decoded_message.pack_msg_data())
         comms.notify_binary('SONAR_PING_DATA', binary_device_data_msg, pymoos.time())
+
+        # Reshape data
+        #ping_intensities_reshaped = ping_intensities.reshape(-1, 1)
+
+        # Get time and create file name
+        #date_time = datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')
+        #file_name = f"""intensity_data_{date_time}_{angle}.csv"""
+
+        # Write data to csv file
+        #np.savetxt(file_name, ping_intensities_reshaped, delimiter=',', fmt='%d')
+
+        #image_name = f"""intensity_data_{date_time}_{angle}.png"""
+        #plt.plot(ping_intensities)
+        #plt.savefig(image_name)
+        #plt.clf()
 
         time.sleep(0.05)
